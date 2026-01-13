@@ -77,19 +77,21 @@ smart_ssh_run() {
   local exit_code=0
 
   # Execute command with a login shell, capturing both stdout and stderr
-  # We use tee to show output to user while capturing it
   ssh -t "$remote_ssh" "bash -l -c 'cd $remote_dir && $cmd'" 2>&1 | tee "$output_file"
   exit_code=${PIPESTATUS[0]}
 
-  # Post-process output to remove TTY/ANSI noise for cleaner matching
-  # This strips ANSI escape codes and carriage returns
-  sed -e 's/\x1b\[[0-9;]*[mK]//g' -e 's/\r//g' "$output_file" > "$clean_file"
+  # Pre-clean the output for matching: remove ANSI, \r, and non-printable chars
+  tr -cd '\11\12\40-\176' < "$output_file" | sed 's/\r//g' > "$clean_file"
 
   if [[ $exit_code -ne 0 ]]; then
+    # DEBUG: Show detection attempt
+    # echo -e "${CYAN}   Checking for networking errors in output...${NC}"
+
     # Check for specific "network not found" error
-    if grep -qiE "failed to set up container networking.*network.*not found" "$clean_file"; then
+    # We look for "network" and "not found" in the same line, which is very robust
+    if grep -qi "network" "$clean_file" && grep -qi "not found" "$clean_file"; then
       echo ""
-      echo -e "${YELLOW}⚠️  Detected stale Docker networking issue. Attempting automatic recovery...${NC}"
+      echo -e "${YELLOW}⚠️  Detected potential Docker networking issue. Attempting automatic recovery...${NC}"
       
       # Determine the appropriate recovery action
       local resolved_cmd="$cmd"
@@ -99,6 +101,7 @@ smart_ssh_run() {
       if [[ "$cmd" =~ ^npm\ run\ ([^[:space:]]+) ]]; then
         local script_name="${BASH_REMATCH[1]}"
         echo -e "${CYAN}   Resolving script '$script_name' from package.json...${NC}"
+        
         # Use jq on remote to find the script definition
         local remote_resolve_cmd="jq -r '.scripts[\"$script_name\"] // \"\"' package.json"
         resolved_cmd=$(ssh "$remote_ssh" "bash -l -c 'cd $remote_dir && $remote_resolve_cmd'" 2>/dev/null || echo "")
@@ -111,14 +114,13 @@ smart_ssh_run() {
       # If the original or resolved command contains "docker compose", extract -f flags
       if [[ "$resolved_cmd" == *"docker compose"* ]]; then
         # Extract all -f arguments to target the correct compose stack
-        # Use a more robust extraction that handles spaces or multiple files
         local f_args=$(echo "$resolved_cmd" | grep -oE "\-f [^[:space:]]+" | tr '\n' ' ')
         recovery_cmd="docker compose $f_args down"
-        echo -e "${CYAN}   Running targeted recovery: $recovery_cmd${NC}"
+        echo -e "${CYAN}   Performing targeted recovery: $recovery_cmd${NC}"
       else
-        # Generic fallback for other situations
+        # Generic fallback
         recovery_cmd="docker compose down"
-        echo -e "${CYAN}   No specific compose context found. Running generic recovery: $recovery_cmd${NC}"
+        echo -e "${CYAN}   No specific compose context found. Performing generic recovery: $recovery_cmd${NC}"
       fi
       
       # Execute recovery on remote host

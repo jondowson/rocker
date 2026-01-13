@@ -434,8 +434,9 @@ tunnel_menu() {
         echo ""
         echo "1) Start tunnel"
         echo "2) Stop tunnel"
-        echo "3) Restart (Tunnel + Non-Swarm Projects)"
-        echo "4) Show detailed port mappings"
+        echo "3) Restart SSH Tunnel (Refresh ports)"
+        echo "4) Restart Remote Projects (Tunnel + Non-Swarm Services)"
+        echo "5) Show detailed port mappings"
         echo ""
         echo "(Press Enter to return to host list)"
         echo ""
@@ -463,7 +464,21 @@ tunnel_menu() {
             echo -e "${GREEN}✓ Tunnel stopped${NC}"
             press_enter
             ;;
-          3) # Restart All (Tunnel + Compose)
+          3) # Restart Tunnel Only
+            echo ""
+            echo -e "${YELLOW}Restarting SSH tunnel for ${selected_host}...${NC}"
+            pkill -f "ssh.*-N.*${selected_host}" 2>/dev/null || true
+            sleep 1
+            REMOTE_SSH="$selected_ssh"
+            REMOTE_HOST="$selected_host"
+            tunnel_start
+            press_enter
+            ;;
+          4) # Restart All (Tunnel + Compose)
+            echo ""
+            if ! confirm "Restart ALL non-swarm Docker projects on ${selected_host}?"; then
+              continue
+            fi
             echo ""
             echo -e "${YELLOW}Restarting everything for ${selected_host}...${NC}"
             
@@ -471,10 +486,7 @@ tunnel_menu() {
             pkill -f "ssh.*-N.*${selected_host}" 2>/dev/null || true
             
             # 2. Find and Restart all non-swarm compose projects on remote
-            # We exclude anything in /stacks or named stack*.yml
             echo "Stopping non-swarm Docker projects on remote..."
-            # Use single quotes for the main command string to avoid local expansion
-            # and double quotes inside for filenames/patterns.
             local remote_cmd='find . -maxdepth 5 -type f \( -name "compose.yml" -o -name "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) ! -path "*/stacks/*" ! -name "stack*" | while read f; do echo "Restarting project: $f"; docker compose -f "$f" down || true; docker compose -f "$f" up -d || true; done'
             
             ssh "$selected_ssh" "bash -l -c '$remote_cmd'"
@@ -487,7 +499,7 @@ tunnel_menu() {
             tunnel_start
             press_enter
             ;;
-          4) # Details
+          5) # Details
             clear
             print_header
             echo -e "${BOLD}Tunnel Details: ${selected_name} (${selected_host})${NC}"

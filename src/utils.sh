@@ -135,5 +135,19 @@ smart_ssh_run() {
     fi
   fi
 
+  # 4. Trigger Tunnel Refresh (if it was an 'up', 'start', or 'restart' command)
+  # Only refresh if the command was successful and the tunnel function is available
+  if [[ $exit_code -eq 0 ]] && [[ "$cmd" =~ (up|start|restart) ]]; then
+    if command -v tunnel_start >/dev/null 2>&1; then
+      echo ""
+      echo -e "${CYAN}🚀 New services may be active. Refreshing SSH tunnel...${NC}"
+      # Run in background to avoid blocking the UI, but with a small delay
+      # to ensure Docker has finished its internal networking setup
+      (sleep 2 && tunnel_start >/dev/null 2>&1) &
+      disown
+      echo -e "${GREEN}✓ Tunnel refresh triggered.${NC}"
+    fi
+  fi
+
   return $exit_code
 }

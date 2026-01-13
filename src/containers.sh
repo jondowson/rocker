@@ -227,13 +227,17 @@ view_all_containers_menu() {
         remote_containers_found=true
         if [[ -n "$ports_raw" ]]; then
           # Extract the HOST port (the one matched after the colon and before the arrow)
-          # Format: 0.0.0.0:8088->80/tcp -> we want 8088
-          local host_port=$(echo "$ports_raw" | grep -oE ':[0-9]+->' | head -1 | grep -oE '[0-9]+' || echo "")
+          # Format: 0.0.0.0:8088->80/tcp -> we want 8088. We use sed to clean up.
+          local host_port=$(echo "$ports_raw" | grep -oE ':[0-9]+->' | head -1 | sed 's/[:>-]//g' || echo "")
           
           if [[ -z "$host_port" ]]; then
-            # Fallback: if no mapped host port, show the port as-is (just exposed)
-            host_port=$(echo "$ports_raw" | grep -oE '[0-9]+' | head -1 || echo "-")
+            # Fallback: if no mapped host port (just exposed), extract the port number
+            # We strip common IP prefixes first to avoid picking up '0' from '0.0.0.0'
+            host_port=$(echo "$ports_raw" | sed 's/0\.0\.0\.0//g; s/\[::\]//g' | grep -oE '[0-9]+' | head -1 || echo "-")
           fi
+
+          # Extract the CONTAINER port for display as the 'Remote Port'
+          local container_port=$(echo "$ports_raw" | grep -oE '->[0-9]+' | head -1 | sed 's/->//' || echo "-")
 
           # Check if this host port is tunneled (use :- to avoid unbound variable error with set -u)
           local local_port="${tunnel_port_map[$host_port]:-}"

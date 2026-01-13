@@ -15,17 +15,8 @@ npm_commands_menu() {
   if [[ -z "$project_name" ]]; then
     echo "No project selected."
     echo ""
-
-    if [[ "$CONTEXT_TYPE" == "remote" ]]; then
-      echo "Searching for projects on ${REMOTE_HOST}..."
-    else
-      echo "Searching for projects with package.json..."
-    fi
+    echo "Scanning local folders for projects (synced)..."
     echo ""
-
-    # Find all directories with package.json
-    local -a projects=()
-    local -a project_paths=()
 
     # Find all directories with package.json
     local -a projects=()
@@ -210,8 +201,9 @@ npm_commands_menu() {
   if [[ "$CONTEXT_TYPE" == "remote" ]]; then
     echo -e "${CYAN}Running on remote (${REMOTE_HOST}): npm run $cmd_name${NC}"
     echo ""
-    # Run on remote host (use project_dir directly as it was discovered remotely)
-    ssh -t "$REMOTE_SSH" "cd '$project_dir' && npm run $cmd_name"
+    # Translate local path to remote-friendly path (using ~ to handle different home dirs)
+    local remote_project_dir="${project_dir/#$HOME/\~}"
+    ssh -t "$REMOTE_SSH" "cd \"$remote_project_dir\" && npm run $cmd_name"
   else
     echo -e "${CYAN}Running locally: npm run $cmd_name${NC}"
     echo ""

@@ -85,12 +85,14 @@ smart_ssh_run() {
   fi
 
   # 2. Execute original command
-  ssh -t "$remote_ssh" "bash -l -c \"cd $remote_dir && $cmd\""
-  local exit_code=$?
+  # We use '|| exit_code=$?' to prevent 'set -e' from aborting the script on failure
+  local exit_code=0
+  ssh -t "$remote_ssh" "bash -l -c \"cd $remote_dir && $cmd\"" || exit_code=$?
 
   # 3. Detection & Recovery (only if command failed)
   if [[ $exit_code -ne 0 ]]; then
-    echo -e "${CYAN}   Command failed. Checking for known environmental issues...${NC}"
+    echo ""
+    echo -e "${YELLOW}🔍 Command failed (exit: $exit_code). checking for environmental issues...${NC}"
     
     # Check for networking errors in the containers of this stack
     # We query Docker directly so results aren't affected by TTY noise
@@ -102,25 +104,29 @@ smart_ssh_run() {
     if [[ -n "$container_names" ]]; then
       for container in $container_names; do
         # Inspect each container for the specific "network not found" error state
+        # We also check for 'endpoint with name ... already exists' which is related
         local error_msg=$(ssh "$remote_ssh" "docker inspect $container --format '{{.State.Error}}'" 2>/dev/null || echo "")
-        if [[ "$error_msg" =~ "network" ]] && [[ "$error_msg" =~ "not found" ]]; then
+        if [[ "$error_msg" =~ "network" && "$error_msg" =~ "not found" ]] || [[ "$error_msg" =~ "endpoint" && "$error_msg" =~ "already exists" ]]; then
           networking_error_found=true
           echo -e "${YELLOW}⚠️  Detected stale networking reference in container: $container${NC}"
+          echo -e "${RED}   Error: $error_msg${NC}"
           break
         fi
       done
     fi
 
     if [ "$networking_error_found" = true ]; then
-      echo -e "${CYAN}   This is a known issue where containers hold onto old Network IDs.${NC}"
-      echo -e "${CYAN}   Attempting automatic 'clean slate' reset...${NC}"
+      echo -e "${CYAN}   This is a known Docker issue where containers hold onto old Network IDs.${NC}"
+      echo -e "${CYAN}   Attempting automatic 'clean slate' reset for this project...${NC}"
+      echo ""
       
       local recovery_cmd="docker compose $f_args down"
-      echo -e "${BOLD}Running recovery: $recovery_cmd${NC}"
+      echo -e "${BOLD}Running: $recovery_cmd${NC}"
       ssh "$remote_ssh" "bash -l -c \"cd $remote_dir && ($recovery_cmd || true)\"" >/dev/null 2>&1
       
       echo -e ""
-      echo -e "${GREEN}✓ Environment reset. Retrying original command...${NC}"
+      echo -e "${GREEN}✓ Done. Environment reset.${NC}"
+      echo -e "${CYAN}   Retrying original command...${NC}"
       echo ""
       
       # Retry original command

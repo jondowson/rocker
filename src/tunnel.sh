@@ -50,7 +50,8 @@ tunnel_start() {
     local project_path="${LOCAL_ROOT_DIR}/${LOCAL_NAMESPACE}"
 
     if [[ -d "$project_path" ]]; then
-      local idx=1
+      echo "1) [All Projects]"
+      local idx=2
       while IFS= read -r dir; do
         local project_name=$(basename "$dir")
         projects+=("$project_name")
@@ -62,11 +63,29 @@ tunnel_start() {
       echo -n "Select project: "
       read -r proj_choice
 
-      if [[ "$proj_choice" =~ ^[0-9]+$ ]] && [[ $proj_choice -ge 1 ]] && [[ $proj_choice -lt $idx ]]; then
-        CURRENT_PROJECT="${projects[$((proj_choice-1))]}"
+      if [[ "$proj_choice" == "1" ]]; then
+        CURRENT_PROJECT="all"
+        echo ""
+        echo -e "${GREEN}✓ Mode: All Projects in $LOCAL_NAMESPACE${NC}"
+        
+        # Find ALL compose files in the entire namespace
+        local -a all_compose_files=()
+        while IFS= read -r compose_file; do
+          all_compose_files+=("$compose_file")
+        done < <(find "$project_path" -maxdepth 6 -type f \( -name "compose.yml" -o -name "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) 2>/dev/null | sort)
+        
+        if [[ ${#all_compose_files[@]} -gt 0 ]]; then
+          SELECTED_COMPOSE_FILES=("${all_compose_files[@]}")
+          echo -e "${GREEN}✓ Found ${#all_compose_files[@]} compose files across all projects.${NC}"
+        else
+          echo -e "${YELLOW}No compose files found in namespace: $project_path${NC}"
+          SELECTED_COMPOSE_FILES=()
+        fi
+      elif [[ "$proj_choice" =~ ^[0-9]+$ ]] && [[ $proj_choice -ge 2 ]] && [[ $proj_choice -lt $idx ]]; then
+        CURRENT_PROJECT="${projects[$((proj_choice-2))]}"
         echo ""
         echo -e "${GREEN}✓ Selected project: $CURRENT_PROJECT${NC}"
-
+        
         # STEP 2: Ask user to select compose file(s)
         echo ""
         echo -e "${BOLD}Select Compose File(s):${NC}"
@@ -82,11 +101,11 @@ tunnel_start() {
 
         if [[ ${#compose_files[@]} -gt 0 ]]; then
           echo "1) All compose files (${#compose_files[@]} found)"
-          local idx=2
+          local idx_c=2
           for compose_file in "${compose_files[@]}"; do
             local relative_path="${compose_file#$project_full_path/}"
-            echo "$idx) $relative_path"
-            ((idx++))
+            echo "$idx_c) $relative_path"
+            ((idx_c++))
           done
 
           echo ""
@@ -98,7 +117,7 @@ tunnel_start() {
             SELECTED_COMPOSE_FILES=("${compose_files[@]}")
             echo ""
             echo -e "${GREEN}✓ Using all ${#compose_files[@]} compose files${NC}"
-          elif [[ "$compose_choice" =~ ^[0-9]+$ ]] && [[ $compose_choice -ge 2 ]] && [[ $compose_choice -lt $idx ]]; then
+          elif [[ "$compose_choice" =~ ^[0-9]+$ ]] && [[ $compose_choice -ge 2 ]] && [[ $compose_choice -lt $idx_c ]]; then
             # Use specific compose file
             SELECTED_COMPOSE_FILES=("${compose_files[$((compose_choice-2))]}")
             echo ""

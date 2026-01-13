@@ -434,9 +434,8 @@ tunnel_menu() {
         echo ""
         echo "1) Start tunnel"
         echo "2) Stop tunnel"
-        echo "3) Restart SSH Tunnel (Refresh ports)"
-        echo "4) Restart Remote Projects (Tunnel + Non-Swarm Services)"
-        echo "5) Show detailed port mappings"
+        echo "3) Restart (Refresh port mappings)"
+        echo "4) Show detailed port mappings"
         echo ""
         echo "(Press Enter to return to host list)"
         echo ""
@@ -464,7 +463,7 @@ tunnel_menu() {
             echo -e "${GREEN}✓ Tunnel stopped${NC}"
             press_enter
             ;;
-          3) # Restart Tunnel Only
+          3) # Restart/Refresh
             echo ""
             echo -e "${YELLOW}Restarting SSH tunnel for ${selected_host}...${NC}"
             pkill -f "ssh.*-N.*${selected_host}" 2>/dev/null || true
@@ -474,32 +473,7 @@ tunnel_menu() {
             tunnel_start
             press_enter
             ;;
-          4) # Restart All (Tunnel + Compose)
-            echo ""
-            if ! confirm "Restart ALL non-swarm Docker projects on ${selected_host}?"; then
-              continue
-            fi
-            echo ""
-            echo -e "${YELLOW}Restarting everything for ${selected_host}...${NC}"
-            
-            # 1. Stop Tunnel
-            pkill -f "ssh.*-N.*${selected_host}" 2>/dev/null || true
-            
-            # 2. Find and Restart all non-swarm compose projects on remote
-            echo "Stopping non-swarm Docker projects on remote..."
-            local remote_cmd='find . -maxdepth 5 -type f \( -name "compose.yml" -o -name "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) ! -path "*/stacks/*" ! -name "stack*" | while read f; do echo "Restarting project: $f"; docker compose -f "$f" down || true; docker compose -f "$f" up -d || true; done'
-            
-            ssh "$selected_ssh" "bash -l -c '$remote_cmd'"
-            
-            # 3. Start Tunnel
-            echo ""
-            echo "Starting SSH tunnel..."
-            REMOTE_SSH="$selected_ssh"
-            REMOTE_HOST="$selected_host"
-            tunnel_start
-            press_enter
-            ;;
-          5) # Details
+          4) # Details
             clear
             print_header
             echo -e "${BOLD}Tunnel Details: ${selected_name} (${selected_host})${NC}"

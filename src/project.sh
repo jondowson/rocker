@@ -192,7 +192,7 @@ discover_all_local_ports() {
 
       while IFS= read -r f; do
         [[ -n "$f" ]] && files_to_scan+=("$f")
-      done < <(find "${search_path}" -maxdepth 5 -type f \( -name "compose.yml" -o "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) 2>/dev/null || true)
+      done < <(find "${search_path}" -maxdepth 5 -type f \( -name "compose.yml" -o -name "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) 2>/dev/null || true)
     fi
 
     for compose_file in "${files_to_scan[@]}"; do
@@ -210,7 +210,7 @@ discover_all_local_ports() {
               for ((p=start; p<=end; p++)); do echo "$p"; done
             fi
           else
-            echo "$host_part" | grep -oE '^[0-9]+$' || true
+            echo "$host_part" | grep -oE -- '^[0-9]+$' || true
           fi
         done
     done
@@ -227,10 +227,10 @@ discover_all_local_ports() {
             for ((p=start; p<=end; p++)); do echo "$p"; done
           fi
         else
-          echo "$p_range" | grep -oE '^[0-9]+$' || true
+          echo "$p_range" | grep -oE -- '^[0-9]+$' || true
         fi
       done
-  } | grep -v '^0$' | sort -u -n || true
+  } | grep -v -- '^0$' | sort -u -n || true
 }
 
 # Generate dynamic tunnel port mappings with conflict resolution

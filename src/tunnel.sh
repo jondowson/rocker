@@ -242,7 +242,7 @@ tunnel_start() {
 
   # Check for port forward failures in the log
   if [[ -s "$log_file" ]]; then
-    local failed_binds=$(grep -i "bind.*failed\|cannot listen" "$log_file" || true)
+    local failed_binds=$(grep -i -- "bind.*failed\|cannot listen" "$log_file" || true)
     if [[ -n "$failed_binds" ]]; then
       echo -e "   ${YELLOW}⚠ Some port forwards may have failed:${NC}"
       echo "$failed_binds" | sed 's/^/     /' | head -5
@@ -263,7 +263,7 @@ tunnel_start() {
         [[ -z "$local_port" ]] && continue
 
         # Check if SSH process is holding this port (not just any process)
-        if lsof -nP -iTCP:${local_port} -sTCP:LISTEN 2>/dev/null | grep -q "ssh"; then
+        if lsof -nP -iTCP:${local_port} -sTCP:LISTEN 2>/dev/null | grep -q -- "ssh"; then
           listening_count=$((listening_count + 1))
         fi
       done

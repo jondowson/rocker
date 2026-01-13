@@ -26,7 +26,7 @@ get_ip_address() {
 
   if [[ -z "$ip" ]]; then
     # Final fallback: try ping to resolve
-    ip=$(ping -c 1 -W 1 "$hostname" 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    ip=$(ping -c 1 -W 1 "$hostname" 2>/dev/null | head -1 | grep -oE -- '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   fi
 
   echo "$ip"

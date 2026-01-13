@@ -164,7 +164,7 @@ view_all_containers_menu() {
     while IFS='|' read -r name ports_raw; do
       containers_found=true
       # Parse ports (e.g., "0.0.0.0:5173->5173/tcp")
-      local port=$(echo "$ports_raw" | grep -oE '[0-9]+->([0-9]+)' | head -1 | cut -d'>' -f2)
+      local port=$(echo "$ports_raw" | grep -oE -- '[0-9]+->([0-9]+)' | head -1 | cut -d'>' -f2)
 
       if [[ -n "$port" ]]; then
         printf "${GREEN}%-30s${NC} %-15s ${CYAN}%s${NC}\n" \
@@ -255,7 +255,7 @@ view_all_containers_menu() {
               fi
             else
               # Single port
-              local hp=$(echo "$h_part" | grep -oE '^[0-9]+$' || echo "")
+              local hp=$(echo "$h_part" | grep -oE -- '^[0-9]+$' || echo "")
               if [[ -n "$hp" ]]; then
                 local lp="${tunnel_port_map[$hp]:-}"
                 host_ports="${host_ports}${hp}, "
@@ -268,7 +268,7 @@ view_all_containers_menu() {
                 fi
               fi
             fi
-          done < <(echo "$ports_raw" | tr ',' '\n' | grep '->' || true)
+          done < <(echo "$ports_raw" | tr ',' '\n' | grep -- '->' || true)
 
           # Clean up trailing commas
           host_ports=${host_ports%, }
@@ -276,7 +276,7 @@ view_all_containers_menu() {
 
           if [[ -z "$host_ports" ]]; then
              # Case for exposed but not mapped ports or other formats
-             host_ports=$(echo "$ports_raw" | sed 's/0\.0\.0\.0//g; s/\[::\]//g' | grep -oE '[0-9]+' | head -1 || echo "-")
+             host_ports=$(echo "$ports_raw" | sed 's/0\.0\.0\.0//g; s/\[::\]//g' | grep -oE -- '[0-9]+' | head -1 || echo "-")
              local_ports="-"
              first_url="-"
           fi

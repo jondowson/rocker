@@ -65,6 +65,7 @@ press_enter() {
 }
 
 # Smart SSH execution with automatic recovery for common errors
+# Detects "network not found" errors and tries to recover by resetting the relevant Docker Compose stack (if applicable)
 smart_ssh_run() {
   local remote_ssh="$1"
   local remote_dir="$2"
@@ -85,14 +86,23 @@ smart_ssh_run() {
       echo ""
       echo -e "${YELLOW}⚠️  Detected stale Docker networking issue. Attempting automatic recovery...${NC}"
       
-      # Attempt recovery: Reset suspected compose stacks
-      echo -e "${CYAN}   Resetting known compose stacks to clear stale network references...${NC}"
+      # Determine the appropriate recovery action
+      local recovery_cmd=""
       
-      # Try known project-specific locations for this monorepo
-      ssh "$remote_ssh" "bash -l -c 'cd $remote_dir && \
-        (docker compose -f docker/compose/local-tools/docker-compose.yml down || true) && \
-        (docker compose -f docker/compose/local-dev/docker-compose.yml down || true) && \
-        (docker compose down || true)'" >/dev/null 2>&1
+      # If it's a docker compose command, try to extract its specific context
+      if [[ "$cmd" == *"docker compose"* ]]; then
+        # Extract all -f arguments to target the correct compose stack
+        local f_args=$(echo "$cmd" | grep -oE "\-f [^[:space:]]+" | tr '\n' ' ')
+        recovery_cmd="docker compose $f_args down"
+        echo -e "${CYAN}   Identified Docker Compose context. Running recovery: $recovery_cmd${NC}"
+      else
+        # Generic fallback for other docker commands
+        recovery_cmd="docker compose down"
+        echo -e "${CYAN}   No specific compose context found. Running generic recovery: $recovery_cmd${NC}"
+      fi
+      
+      # Execute recovery on remote host
+      ssh "$remote_ssh" "bash -l -c 'cd $remote_dir && ($recovery_cmd || true)'" >/dev/null 2>&1
       
       echo -e "${CYAN}   Retrying original command...${NC}"
       echo ""

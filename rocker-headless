@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Headless mode toggle for macOS laptops
+# Usage:
+#   rocker-headless on
+#   rocker-headless off
+#   rocker-headless status
+
+# Defaults when turning OFF (edit to taste)
+NORMAL_SLEEP="${NORMAL_SLEEP:-10}"        # minutes
+NORMAL_DISPLAY_SLEEP="${NORMAL_DISPLAY_SLEEP:-10}"
+NORMAL_DISK_SLEEP="${NORMAL_DISK_SLEEP:-10}"
+
+# Caffeinate management (optional but recommended)
+CAFFE_PID_FILE="${HOME}/.headless_caffeinate.pid"
+
+require_sudo() {
+  sudo -v >/dev/null
+}
+
+start_caffeinate() {
+  if [[ -f "$CAFFE_PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$CAFFE_PID_FILE" || true)"
+    if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+    rm -f "$CAFFE_PID_FILE"
+  fi
+
+  # -d display, -i idle, -m disk, -s system, -u user activity
+  # We background it and store PID.
+  nohup caffeinate -dimsu >/dev/null 2>&1 &
+  echo $! > "$CAFFE_PID_FILE"
+}
+
+stop_caffeinate() {
+  if [[ -f "$CAFFE_PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$CAFFE_PID_FILE" || true)"
+    if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    rm -f "$CAFFE_PID_FILE"
+  fi
+
+  # Also kill any stray caffeinate instances we started earlier (best-effort)
+  pkill -f "caffeinate -dimsu" 2>/dev/null || true
+}
+
+show_status() {
+  echo "== Power settings =="
+  pmset -g | egrep "sleep|displaysleep|disksleep|disablesleep|womp|powernap" || true
+  echo
+  echo "== SSH Remote Login =="
+  # Check if SSH is enabled (doesn't require sudo)
+  if sudo -n systemsetup -getremotelogin 2>/dev/null; then
+    : # Command succeeded
+  else
+    # Try without sudo or show alternative status
+    if pgrep -q sshd; then
+      echo "SSH daemon running (Remote Login appears enabled)"
+    else
+      echo "Cannot determine SSH status (requires sudo)"
+    fi
+  fi
+  echo
+  echo "== Caffeinate =="
+  if [[ -f "$CAFFE_PID_FILE" ]]; then
+    local pid
+    pid="$(cat "$CAFFE_PID_FILE" || true)"
+    if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+      echo "✓ Caffeinate running (pid $pid)"
+    else
+      echo "✗ Caffeinate pid file exists but process not running"
+    fi
+  else
+    echo "✗ Caffeinate not started (use option 3 to start)"
+  fi
+}
+
+enable_headless() {
+  require_sudo
+
+  echo "Enabling headless mode..."
+  # Prevent all sleeping
+  sudo pmset -a sleep 0
+  sudo pmset -a disablesleep 1
+  sudo pmset -a disksleep 0
+  sudo pmset -a displaysleep 0
+
+  # Helpful: allow wake for network access (womp = Wake on Magic Packet)
+  sudo pmset -a womp 1 || true
+
+  # Ensure SSH is enabled
+  sudo systemsetup -setremotelogin on >/dev/null 2>&1 || true
+
+  echo "Headless mode: ON"
+  echo "Note: lid-closed SSH reliability typically requires the MacBook to be plugged into power."
+  echo "Tip: Caffeinate is optional and can be started separately for extra insurance."
+}
+
+disable_headless() {
+  require_sudo
+
+  echo "Disabling headless mode..."
+  # Restore reasonable defaults (edit env vars above if you want different)
+  sudo pmset -a disablesleep 0
+  sudo pmset -a sleep "$NORMAL_SLEEP"
+  sudo pmset -a disksleep "$NORMAL_DISK_SLEEP"
+  sudo pmset -a displaysleep "$NORMAL_DISPLAY_SLEEP"
+
+  echo "Headless mode: OFF"
+  echo "Note: Caffeinate (if running) is left running. Stop it separately if desired."
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  on) enable_headless ;;
+  off) disable_headless ;;
+  status) show_status ;;
+  caffeinate-on)
+    # Lightweight option: just start caffeinate without pmset changes
+    start_caffeinate
+    echo "Caffeinate started (lightweight mode - no pmset changes)"
+    ;;
+  caffeinate-off)
+    # Just stop caffeinate
+    stop_caffeinate
+    echo "Caffeinate stopped"
+    ;;
+  caffeinate-status)
+    # Check caffeinate status only
+    if [[ -f "$CAFFE_PID_FILE" ]]; then
+      pid="$(cat "$CAFFE_PID_FILE" || true)"
+      if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+        echo "✓ Caffeinate running (pid $pid)"
+        exit 0
+      else
+        echo "✗ Caffeinate NOT running"
+        exit 1
+      fi
+    else
+      echo "✗ Caffeinate NOT running"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Usage: $(basename "$0") {on|off|status|caffeinate-on|caffeinate-off|caffeinate-status}"
+    echo ""
+    echo "Commands:"
+    echo "  on                 Enable full headless mode (pmset + caffeinate)"
+    echo "  off                Disable full headless mode (restore pmset + stop caffeinate)"
+    echo "  status             Show complete status (power settings, SSH, caffeinate)"
+    echo "  caffeinate-on      Start caffeinate only (lightweight, no pmset changes)"
+    echo "  caffeinate-off     Stop caffeinate only"
+    echo "  caffeinate-status  Check caffeinate status only"
+    exit 1
+    ;;
+esac

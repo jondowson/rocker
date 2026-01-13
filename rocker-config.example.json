@@ -1,0 +1,50 @@
+{
+  "contexts": [
+    {
+      "name": "local",
+      "type": "local",
+      "description": "Local development (this machine)",
+      "docker_engine": "docker-desktop",
+      "docker_context": "desktop-linux"
+    },
+    {
+      "name": "local_colima",
+      "type": "local",
+      "description": "Local development with Colima",
+      "docker_engine": "colima",
+      "docker_context_pattern": "colima-{project}"
+    },
+    {
+      "name": "remote_arthur",
+      "type": "remote",
+      "host": "arthur.local",
+      "user": "",
+      "description": "Remote Mac ()",
+      "docker_engine": "colima",
+      "docker_context_pattern": "colima-{project}"
+    },
+    {
+      "name": "remote_excalibur",
+      "type": "remote",
+      "host": "excalibur.local",
+      "user": "arthur",
+      "description": "Remote Linux Server",
+      "docker_engine": "colima",
+      "docker_context_pattern": "colima-{project}"
+    }
+  ],
+  "default_context": "remote_arthur",
+  "docker": {
+    "username": "your_docker_username",
+    "password": "your_docker_password"
+  },
+  "paths": {
+    "local_root_dir": "~/Development",
+    "local_namespace": "Acme"
+  },
+  "headless": {
+    "normal_sleep": 10,
+    "normal_display_sleep": 10,
+    "normal_disk_sleep": 10
+  }
+}

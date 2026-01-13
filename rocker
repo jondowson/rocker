@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ============================================================
+# rocker: Interactive menu for remote Docker development
+# ============================================================
+# Modular version - sources components from src/ directory
+# ============================================================
+
+# Get the directory where this script is located (resolve symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -h "$SOURCE" ]]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$SCRIPT_DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+# Source all modules in dependency order
+source "${SCRIPT_DIR}/src/colors.sh"     # Color definitions (no dependencies)
+source "${SCRIPT_DIR}/src/init.sh"       # Initialization & bootstrap
+source "${SCRIPT_DIR}/src/config.sh"     # Configuration management
+source "${SCRIPT_DIR}/src/utils.sh"      # General utilities
+source "${SCRIPT_DIR}/src/project.sh"    # Project discovery & selection
+source "${SCRIPT_DIR}/src/tunnel.sh"     # SSH tunnel operations
+source "${SCRIPT_DIR}/src/docker.sh"     # Docker context management
+source "${SCRIPT_DIR}/src/containers.sh" # Container viewing
+source "${SCRIPT_DIR}/src/npm.sh"        # NPM commands
+source "${SCRIPT_DIR}/src/headless.sh"   # Headless mode menu
+source "${SCRIPT_DIR}/src/menu.sh"       # Main menu & application loop
+
+# Start application
+main_menu

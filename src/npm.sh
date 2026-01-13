@@ -201,9 +201,17 @@ npm_commands_menu() {
   if [[ "$CONTEXT_TYPE" == "remote" ]]; then
     echo -e "${CYAN}Running on remote (${REMOTE_HOST}): npm run $cmd_name${NC}"
     echo ""
-    # Translate local path to remote-friendly path (using ~ to handle different home dirs)
-    local remote_project_dir="${project_dir/#$HOME/\~}"
-    ssh -t "$REMOTE_SSH" "cd \"$remote_project_dir\" && npm run $cmd_name"
+    # Translate local path to remote-friendly path
+    local remote_project_dir
+    if [[ "$project_dir" == "$HOME"* ]]; then
+      # If in home, use unquoted ~/ for expansion + quoted relative path
+      local rel_path="${project_dir#$HOME/}"
+      remote_project_dir="~/\"$rel_path\""
+    else
+      # Otherwise use full quoted path
+      remote_project_dir="\"$project_dir\""
+    fi
+    ssh -t "$REMOTE_SSH" "cd $remote_project_dir && npm run $cmd_name"
   else
     echo -e "${CYAN}Running locally: npm run $cmd_name${NC}"
     echo ""

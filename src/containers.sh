@@ -225,28 +225,68 @@ view_all_containers_menu() {
     if [[ -n "$remote_containers" ]]; then
       while IFS='|' read -r name ports_raw; do
         remote_containers_found=true
+        local host_ports=""
+        local local_ports=""
+        local first_url=""
+        local is_tunneled=false
+
         if [[ -n "$ports_raw" ]]; then
-          # Extract the HOST port (the one matched after the colon and before the arrow)
-          # Format: 0.0.0.0:8088->80/tcp -> we want 8088. We use sed to clean up.
-          local host_port=$(echo "$ports_raw" | grep -oE -- ':[0-9]+->' | head -1 | sed 's/[:>-]//g' || echo "")
-          
-          if [[ -z "$host_port" ]]; then
-            # Fallback: if no mapped host port (just exposed), extract the port number
-            # We strip common IP prefixes first to avoid picking up '0' from '0.0.0.0'
-            host_port=$(echo "$ports_raw" | sed 's/0\.0\.0\.0//g; s/\[::\]//g' | grep -oE -- '[0-9]+' | head -1 || echo "-")
+          # Extract all ports from ports_raw (handles multiple and ranges)
+          while IFS= read -r p_entry; do
+            [[ -n "$p_entry" ]] || continue
+            # Extract host part: after colon, before arrow
+            local h_part=$(echo "$p_entry" | sed -E 's/.*:([0-9-]+)->.*/\1/')
+            # Handle ranges (e.g., 9000-9001)
+            if [[ "$h_part" =~ - ]]; then
+              local start=$(echo "$h_part" | cut -d- -f1)
+              local end=$(echo "$h_part" | cut -d- -f2)
+              if [[ "$start" =~ ^[0-9]+$ ]] && [[ "$end" =~ ^[0-9]+$ ]]; then
+                for ((p=start; p<=end; p++)); do
+                  local lp="${tunnel_port_map[$p]:-}"
+                  host_ports="${host_ports}${p}, "
+                  if [[ -n "$lp" ]]; then
+                    local_ports="${local_ports}${lp}, "
+                    is_tunneled=true
+                    [[ -z "$first_url" ]] && first_url="http://localhost:$lp"
+                  else
+                    local_ports="${local_ports}?, "
+                  fi
+                done
+              fi
+            else
+              # Single port
+              local hp=$(echo "$h_part" | grep -oE '^[0-9]+$' || echo "")
+              if [[ -n "$hp" ]]; then
+                local lp="${tunnel_port_map[$hp]:-}"
+                host_ports="${host_ports}${hp}, "
+                if [[ -n "$lp" ]]; then
+                  local_ports="${local_ports}${lp}, "
+                  is_tunneled=true
+                  [[ -z "$first_url" ]] && first_url="http://localhost:$lp"
+                else
+                  local_ports="${local_ports}?, "
+                fi
+              fi
+            fi
+          done < <(echo "$ports_raw" | tr ',' '\n' | grep '->' || true)
+
+          # Clean up trailing commas
+          host_ports=${host_ports%, }
+          local_ports=${local_ports%, }
+
+          if [[ -z "$host_ports" ]]; then
+             # Case for exposed but not mapped ports or other formats
+             host_ports=$(echo "$ports_raw" | sed 's/0\.0\.0\.0//g; s/\[::\]//g' | grep -oE '[0-9]+' | head -1 || echo "-")
+             local_ports="-"
+             first_url="-"
           fi
 
-          # Extract the CONTAINER port for display as the 'Remote Port'
-          local container_port=$(echo "$ports_raw" | grep -oE -- '->[0-9]+' | head -1 | sed 's/->//' || echo "-")
-
-          # Check if this host port is tunneled (use :- to avoid unbound variable error with set -u)
-          local local_port="${tunnel_port_map[$host_port]:-}"
-          if [[ -n "$local_port" ]]; then
+          if $is_tunneled; then
             printf "${GREEN}%-30s${NC} %-15s ${CYAN}%-15s${NC} ${CYAN}%s${NC}\n" \
-              "$name" "$host_port" "$local_port" "http://localhost:$local_port"
+              "$name" "$host_ports" "$local_ports" "$first_url"
           else
             printf "${GREEN}%-30s${NC} %-15s ${YELLOW}%-15s${NC} ${YELLOW}%s${NC}\n" \
-              "$name" "$host_port" "(not tunneled)" "-"
+              "$name" "$host_ports" "(not tunneled)" "-"
           fi
         else
           printf "${GREEN}%-30s${NC} %-15s %-15s %s\n" \

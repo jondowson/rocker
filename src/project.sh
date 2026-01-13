@@ -206,16 +206,19 @@ discover_all_local_ports() {
       # - "8080:8080"
       # - 8080:8080
       # - "127.0.0.1:8080:80"
-      # We extract the HOST port (the one before the last colon)
+      # - "0.0.0.0:80:80"
+      # We extract the HOST port (the one before the last colon OR after the only colon)
       grep -E -- '^[[:space:]]*-([[:space:]]|")[0-9.:]+:[0-9]+' "$compose_file" 2>/dev/null | \
-        sed -E 's/.*[[:space:]]*-([[:space:]]|")//; s/[" ]//g; s/.*:([0-9]+):[0-9]+/\1/; s/([0-9]+):[0-9]+/\1/' | \
-        grep -oE -- '^[0-9]+$' || true
+        sed -E 's/.*[[:space:]]*-([[:space:]]|")//; s/[" ]//g; s/.*:([0-9]+):[0-9]+/\1/; s/.*:([0-9]+)/\1/' | \
+        grep -oE -- '^[0-9]+$' | grep -v '^0$' || true
     done
 
-    # Also get ports from running containers (local)
+    # Also get ports from running containers
+    # We extract the host port: after a colon and before an arrow OR end of string
     docker ps --format '{{.Ports}}' 2>/dev/null | \
-      grep -oE -- '0\.0\.0\.0:[0-9]+|:[0-9]+->' | \
-      grep -oE -- '[0-9]+' || true
+      grep -oE -- ':[0-9]+(->|$)' | \
+      grep -oE -- '[0-9]+' | \
+      grep -v '^0$' || true
   } | sort -u -n || true
 
   return 0

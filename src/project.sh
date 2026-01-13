@@ -153,7 +153,7 @@ get_project_ports() {
 
   # Extract local ports from compose file (left side of port mappings)
   # Match patterns like "5173:5173" or "3000:3000" and extract the first number
-  grep -E '^\s*-\s*"?[0-9]+:[0-9]+"?' "$compose_file" 2>/dev/null | \
+  grep -E -- '^\s*-\s*"?[0-9]+:[0-9]+"?' "$compose_file" 2>/dev/null | \
     sed -E 's/.*"?([0-9]+):[0-9]+.*/\1/' | \
     sort -u
 }
@@ -170,7 +170,7 @@ discover_remote_ports() {
   # docker port output: "5173/tcp -> 0.0.0.0:5173" or "5173/tcp -> :::5173"
   # We need to extract the HOST port (after the last colon), not the container port
   ssh "$remote_ssh" 'docker ps --format "{{.Names}}" 2>/dev/null | while read name; do
-    docker port "$name" 2>/dev/null | grep -oE ":[0-9]+" | grep -oE "[0-9]+" || true
+    docker port "$name" 2>/dev/null | grep -oE -- ":[0-9]+" | grep -oE -- "[0-9]+" || true
   done' 2>/dev/null | sort -u || true
 
   return 0
@@ -207,15 +207,15 @@ discover_all_local_ports() {
       # - 8080:8080
       # - "127.0.0.1:8080:80"
       # We extract the HOST port (the one before the last colon)
-      grep -E '^[[:space:]]*-([[:space:]]|")[0-9.:]+:[0-9]+' "$compose_file" 2>/dev/null | \
+      grep -E -- '^[[:space:]]*-([[:space:]]|")[0-9.:]+:[0-9]+' "$compose_file" 2>/dev/null | \
         sed -E 's/.*[[:space:]]*-([[:space:]]|")//; s/[" ]//g; s/.*:([0-9]+):[0-9]+/\1/; s/([0-9]+):[0-9]+/\1/' | \
-        grep -oE '^[0-9]+$' || true
+        grep -oE -- '^[0-9]+$' || true
     done
 
     # Also get ports from running containers (local)
     docker ps --format '{{.Ports}}' 2>/dev/null | \
-      grep -oE '0\.0\.0\.0:[0-9]+|:[0-9]+->' | \
-      grep -oE '[0-9]+' || true
+      grep -oE -- '0\.0\.0\.0:[0-9]+|:[0-9]+->' | \
+      grep -oE -- '[0-9]+' || true
   } | sort -u -n || true
 
   return 0
@@ -240,7 +240,7 @@ generate_tunnel_mappings() {
   while IFS= read -r local_port; do
     [[ -n "$local_port" ]] || continue
     port_usage[$local_port]="tunnel:active"
-  done < <(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep 'ssh' | grep -oE ':[0-9]+' | sed 's/://' | sort -u || true)
+  done < <(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep 'ssh' | grep -oE -- ':[0-9]+' | sed 's/://' | sort -u || true)
 
   # Step 3: Create tunnel mappings for each compose port
   # Use compose file ports as the REMOTE ports, find available LOCAL ports

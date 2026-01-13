@@ -379,35 +379,22 @@ tunnel_menu() {
     for i in "${!remote_contexts[@]}"; do
       local ctx_name="${remote_contexts[$i]}"
       local ctx_host="${remote_hosts[$i]}"
-      local ctx_user="${remote_users[$i]}"
       local display_idx=$((i + 1))
-
-      # Build SSH target
-      local ssh_target="$ctx_host"
-      if [[ -n "$ctx_user" ]]; then
-        ssh_target="${ctx_user}@${ctx_host}"
-      fi
 
       # Check if tunnel is running for this host
       local ssh_pids=$(pgrep -f "ssh.*-N.*${ctx_host}" 2>/dev/null || true)
 
       if [[ -n "$ssh_pids" ]]; then
-        # Tunnel is running - extract port mappings
+        # Tunnel is running - extract port mappings (safe grep for macOS)
         local ssh_pid=$(echo "$ssh_pids" | tr -d '\n' | awk '{print $1}')
         local ssh_cmd=$(ps -p "$ssh_pid" -o args= 2>/dev/null || echo "")
+        local port_count=$(echo "$ssh_cmd" | grep -oE -- '-L [0-9]+:localhost:[0-9]+' | wc -l | xargs)
+        local first_mapping=$(echo "$ssh_cmd" | grep -oE -- '-L [0-9]+:localhost:[0-9]+' | head -1 | sed 's/-L //' || echo "")
 
-        # Count port mappings
-        local port_count=$(echo "$ssh_cmd" | grep -oE '\-L [0-9]+:localhost:[0-9]+' | wc -l | xargs)
-
-        # Get first port mapping for display
-        local first_mapping=$(echo "$ssh_cmd" | grep -oE '\-L [0-9]+:localhost:[0-9]+' | head -1 | sed 's/-L //' || echo "")
-
-        # Format with proper spacing (printf can't handle pre-colored strings)
         printf "${BOLD}%-3s${NC} %-20s %-22s " "$display_idx" "$ctx_name" "$ctx_host"
         echo -e -n "${GREEN}● Active${NC}        "
         echo -e "${CYAN}${port_count} ports${NC} ${DIM}(${first_mapping}...)${NC}"
       else
-        # No tunnel running
         printf "${BOLD}%-3s${NC} %-20s %-22s " "$display_idx" "$ctx_name" "$ctx_host"
         echo -e -n "${DIM}○ Inactive${NC}      "
         echo -e "${DIM}n/a${NC}"
@@ -415,370 +402,125 @@ tunnel_menu() {
     done
 
     echo ""
-    echo -e "${CYAN}Note: Tunnels auto-start when selecting a remote docker context${NC}"
+    echo -e "${BOLD}Actions:${NC} Select host number (#) or press Enter to return"
     echo ""
-    echo -e "${BOLD}Actions:${NC}"
-    echo "1) Select host to start tunnel"
-    echo "2) Select host to stop tunnel"
-    echo "3) Select host to restart tunnel"
-    echo "4) Show detailed port mappings for a host"
-    echo ""
-    echo "(Press Enter to return to main menu)"
-    echo ""
-    echo -n "Select option: "
-    read -r choice
+    echo -n "Select host: "
+    read -r host_num
 
-    case "$choice" in
-      1)
+    if [[ -z "$host_num" || "$host_num" == "0" ]]; then
+      return
+    fi
+
+    if [[ "$host_num" =~ ^[0-9]+$ ]] && [[ $host_num -ge 1 ]] && [[ $host_num -le ${#remote_contexts[@]} ]]; then
+      local selected_idx=$((host_num - 1))
+      local selected_name="${remote_contexts[$selected_idx]}"
+      local selected_host="${remote_hosts[$selected_idx]}"
+      local selected_user="${remote_users[$selected_idx]}"
+      local selected_ssh="$selected_host"
+      [[ -n "$selected_user" ]] && selected_ssh="${selected_user}@${selected_host}"
+
+      while true; do
+        clear
+        print_header
+        echo -e "${BOLD}Host Actions: ${selected_name} (${selected_host})${NC}"
         echo ""
-        echo -n "Enter host number to start tunnel: "
-        read -r host_num
-        if [[ "$host_num" =~ ^[0-9]+$ ]] && [[ $host_num -ge 1 ]] && [[ $host_num -le ${#remote_contexts[@]} ]]; then
-          local selected_idx=$((host_num - 1))
-          local selected_host="${remote_hosts[$selected_idx]}"
-          local selected_user="${remote_users[$selected_idx]}"
-          local selected_ssh="$selected_host"
-          if [[ -n "$selected_user" ]]; then
-            selected_ssh="${selected_user}@${selected_host}"
-          fi
-
-          # Check if tunnel already running
-          if pgrep -f "ssh.*-N.*${selected_host}" >/dev/null 2>&1; then
-            echo ""
-            echo -e "${YELLOW}Tunnel already running for ${selected_host}${NC}"
-          else
-            # Get current docker context on remote machine
-            echo ""
-            echo "Detecting active docker context on remote..."
-            local remote_context=$(ssh "$selected_ssh" "docker context show" 2>/dev/null || echo "")
-
-            if [[ -n "$remote_context" ]]; then
-              echo -e "${CYAN}Active context: $remote_context${NC}"
-
-              # Infer project from context
-              local project=""
-              if [[ "$remote_context" =~ ^colima-(.+)$ ]]; then
-                project="${BASH_REMATCH[1]}"
-              elif [[ "$remote_context" != "default" && "$remote_context" != "desktop-linux" ]]; then
-                project="$remote_context"
-              fi
-
-              if [[ -n "$project" ]]; then
-                echo -e "${GREEN}✓ Detected project: $project${NC}"
-
-                # Select compose files for this project
-                echo ""
-                echo -e "${BOLD}Select Compose File(s) for ${project}:${NC}"
-                echo ""
-
-                local -a compose_files=()
-                local project_full_path="${LOCAL_ROOT_DIR}/${LOCAL_NAMESPACE}/${project}"
-
-                # Find all compose files in project
-                while IFS= read -r compose_file; do
-                  compose_files+=("$compose_file")
-                done < <(find "$project_full_path" -maxdepth 5 -type f \( -name "compose.yml" -o -name "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) 2>/dev/null | sort)
-
-                if [[ ${#compose_files[@]} -gt 0 ]]; then
-                  echo "1) All compose files (${#compose_files[@]} found)"
-                  local idx=2
-                  for compose_file in "${compose_files[@]}"; do
-                    local relative_path="${compose_file#$project_full_path/}"
-                    echo "$idx) $relative_path"
-                    ((idx++))
-                  done
-
-                  echo ""
-                  echo -n "Select compose file: "
-                  read -r compose_choice
-
-                  if [[ "$compose_choice" == "1" ]]; then
-                    SELECTED_COMPOSE_FILES=("${compose_files[@]}")
-                    echo ""
-                    echo -e "${GREEN}✓ Using all ${#compose_files[@]} compose files${NC}"
-                  elif [[ "$compose_choice" =~ ^[0-9]+$ ]] && [[ $compose_choice -ge 2 ]] && [[ $compose_choice -lt $idx ]]; then
-                    SELECTED_COMPOSE_FILES=("${compose_files[$((compose_choice-2))]}")
-                    echo ""
-                    echo -e "${GREEN}✓ Using: ${compose_files[$((compose_choice-2))]}${NC}"
-                  else
-                    echo -e "${YELLOW}No selection made, using all compose files${NC}"
-                    SELECTED_COMPOSE_FILES=("${compose_files[@]}")
-                  fi
-                else
-                  echo -e "${YELLOW}No compose files found in project${NC}"
-                  SELECTED_COMPOSE_FILES=()
-                fi
-              else
-                echo -e "${YELLOW}Could not detect project from context${NC}"
-                SELECTED_COMPOSE_FILES=()
-              fi
-            else
-              echo -e "${YELLOW}Could not detect docker context on remote${NC}"
-              SELECTED_COMPOSE_FILES=()
-            fi
-
-            # Generate mappings and start tunnel
-            echo ""
-            echo -e "${GREEN}Starting tunnel for ${selected_host}...${NC}"
-            local mappings=$(generate_tunnel_mappings "$selected_ssh" 2>/dev/null) || true
-            if [[ -n "$mappings" ]]; then
-              local ssh_args="-N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes"
-              while IFS= read -r mapping; do
-                [[ -n "$mapping" ]] && ssh_args="$ssh_args -L $mapping"
-              done <<< "$mappings"
-
-              # Start tunnel in background
-              ssh $ssh_args "$selected_ssh" &
-              sleep 1
-
-              if pgrep -f "ssh.*-N.*${selected_host}" >/dev/null 2>&1; then
-                echo -e "${GREEN}✓ Tunnel started successfully${NC}"
-              else
-                echo -e "${RED}✗ Failed to start tunnel${NC}"
-              fi
-            else
-              echo -e "${YELLOW}No ports found to forward${NC}"
-            fi
-          fi
+        
+        # Current status
+        if pgrep -f "ssh.*-N.*${selected_host}" >/dev/null 2>&1; then
+          echo -e "Status: ${GREEN}● Tunnel Active${NC}"
         else
-          echo -e "${RED}Invalid host number${NC}"
+          echo -e "Status: ${DIM}○ Tunnel Inactive${NC}"
         fi
-        press_enter
-        ;;
-
-      2)
         echo ""
-        echo -n "Enter host number to stop tunnel: "
-        read -r host_num
-        if [[ "$host_num" =~ ^[0-9]+$ ]] && [[ $host_num -ge 1 ]] && [[ $host_num -le ${#remote_contexts[@]} ]]; then
-          local selected_idx=$((host_num - 1))
-          local selected_host="${remote_hosts[$selected_idx]}"
-
-          echo ""
-          echo -e "${YELLOW}Stopping tunnel for ${selected_host}...${NC}"
-          pkill -f "ssh.*-N.*${selected_host}" 2>/dev/null || true
-          sleep 1
-
-          if ! pgrep -f "ssh.*-N.*${selected_host}" >/dev/null 2>&1; then
-            echo -e "${GREEN}✓ Tunnel stopped${NC}"
-          else
-            echo -e "${RED}✗ Failed to stop tunnel${NC}"
-          fi
-        else
-          echo -e "${RED}Invalid host number${NC}"
-        fi
-        press_enter
-        ;;
-
-      3)
+        echo "1) Start tunnel"
+        echo "2) Stop tunnel"
+        echo "3) Restart (Tunnel + Non-Swarm Projects)"
+        echo "4) Show detailed port mappings"
         echo ""
-        echo -n "Enter host number to restart tunnel: "
-        read -r host_num
-        if [[ "$host_num" =~ ^[0-9]+$ ]] && [[ $host_num -ge 1 ]] && [[ $host_num -le ${#remote_contexts[@]} ]]; then
-          local selected_idx=$((host_num - 1))
-          local selected_host="${remote_hosts[$selected_idx]}"
-          local selected_user="${remote_users[$selected_idx]}"
-          local selected_ssh="$selected_host"
-          if [[ -n "$selected_user" ]]; then
-            selected_ssh="${selected_user}@${selected_host}"
-          fi
+        echo "(Press Enter to return to host list)"
+        echo ""
+        echo -n "Select action: "
+        read -r action_choice
 
-          # Get current docker context on remote machine
-          echo ""
-          echo "Detecting active docker context on remote..."
-          local remote_context=$(ssh "$selected_ssh" "docker context show" 2>/dev/null || echo "")
-
-          if [[ -n "$remote_context" ]]; then
-            echo -e "${CYAN}Active context: $remote_context${NC}"
-
-            # Infer project from context
-            local project=""
-            if [[ "$remote_context" =~ ^colima-(.+)$ ]]; then
-              project="${BASH_REMATCH[1]}"
-            elif [[ "$remote_context" != "default" && "$remote_context" != "desktop-linux" ]]; then
-              project="$remote_context"
-            fi
-
-            if [[ -n "$project" ]]; then
-              echo -e "${GREEN}✓ Detected project: $project${NC}"
-
-              # Select compose files for this project
-              echo ""
-              echo -e "${BOLD}Select Compose File(s) for ${project}:${NC}"
-              echo ""
-
-              local -a compose_files=()
-              local project_full_path="${LOCAL_ROOT_DIR}/${LOCAL_NAMESPACE}/${project}"
-
-              # Find all compose files in project
-              while IFS= read -r compose_file; do
-                compose_files+=("$compose_file")
-              done < <(find "$project_full_path" -maxdepth 5 -type f \( -name "compose.yml" -o -name "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) 2>/dev/null | sort)
-
-              if [[ ${#compose_files[@]} -gt 0 ]]; then
-                echo "1) All compose files (${#compose_files[@]} found)"
-                local idx=2
-                for compose_file in "${compose_files[@]}"; do
-                  local relative_path="${compose_file#$project_full_path/}"
-                  echo "$idx) $relative_path"
-                  ((idx++))
-                done
-
-                echo ""
-                echo -n "Select compose file: "
-                read -r compose_choice
-
-                if [[ "$compose_choice" == "1" ]]; then
-                  SELECTED_COMPOSE_FILES=("${compose_files[@]}")
-                  echo ""
-                  echo -e "${GREEN}✓ Using all ${#compose_files[@]} compose files${NC}"
-                elif [[ "$compose_choice" =~ ^[0-9]+$ ]] && [[ $compose_choice -ge 2 ]] && [[ $compose_choice -lt $idx ]]; then
-                  SELECTED_COMPOSE_FILES=("${compose_files[$((compose_choice-2))]}")
-                  echo ""
-                  echo -e "${GREEN}✓ Using: ${compose_files[$((compose_choice-2))]}${NC}"
-                else
-                  echo -e "${YELLOW}No selection made, using all compose files${NC}"
-                  SELECTED_COMPOSE_FILES=("${compose_files[@]}")
-                fi
-              else
-                echo -e "${YELLOW}No compose files found in project${NC}"
-                SELECTED_COMPOSE_FILES=()
-              fi
-            else
-              echo -e "${YELLOW}Could not detect project from context${NC}"
-              SELECTED_COMPOSE_FILES=()
-            fi
-          else
-            echo -e "${YELLOW}Could not detect docker context on remote${NC}"
-            SELECTED_COMPOSE_FILES=()
-          fi
-
-          echo ""
-          echo -e "${YELLOW}Restarting tunnel for ${selected_host}...${NC}"
-
-          # Stop existing tunnel
-          pkill -f "ssh.*-N.*${selected_host}" 2>/dev/null || true
-          sleep 1
-
-          # Start new tunnel
-          local mappings=$(generate_tunnel_mappings "$selected_ssh" 2>/dev/null) || true
-          if [[ -n "$mappings" ]]; then
-            local ssh_args="-N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes"
-            while IFS= read -r mapping; do
-              [[ -n "$mapping" ]] && ssh_args="$ssh_args -L $mapping"
-            done <<< "$mappings"
-
-            ssh $ssh_args "$selected_ssh" &
-            sleep 1
-
+        case "$action_choice" in
+          1) # Start
+            echo ""
             if pgrep -f "ssh.*-N.*${selected_host}" >/dev/null 2>&1; then
-              echo -e "${GREEN}✓ Tunnel restarted successfully${NC}"
+              echo -e "${YELLOW}Tunnel already running.${NC}"
             else
-              echo -e "${RED}✗ Failed to restart tunnel${NC}"
+              echo "Starting tunnel..."
+              # Need to set REMOTE_SSH for tunnel_start to work
+              REMOTE_SSH="$selected_ssh"
+              REMOTE_HOST="$selected_host"
+              tunnel_start
             fi
-          else
-            echo -e "${YELLOW}No ports found to forward${NC}"
-          fi
-        else
-          echo -e "${RED}Invalid host number${NC}"
-        fi
-        press_enter
-        ;;
-
-      4)
-        echo ""
-        echo -n "Enter host number to show details: "
-        read -r host_num
-        if [[ "$host_num" =~ ^[0-9]+$ ]] && [[ $host_num -ge 1 ]] && [[ $host_num -le ${#remote_contexts[@]} ]]; then
-          local selected_idx=$((host_num - 1))
-          local selected_host="${remote_hosts[$selected_idx]}"
-          local selected_name="${remote_contexts[$selected_idx]}"
-          local selected_user="${remote_users[$selected_idx]}"
-          local selected_ssh="$selected_host"
-          if [[ -n "$selected_user" ]]; then
-            selected_ssh="${selected_user}@${selected_host}"
-          fi
-
-          clear
-          print_header
-          echo -e "${BOLD}Tunnel Details: ${selected_name} (${selected_host})${NC}"
-          echo ""
-
-          # Get IP address
-          local host_ip=$(get_ip_address "$selected_host")
-          printf "${BOLD}Host Information:${NC}\n"
-          printf "  Hostname: ${CYAN}%s${NC}\n" "${selected_host}"
-          printf "  IP: ${CYAN}%s${NC}\n" "${host_ip:--}"
-          printf "  SSH: ${CYAN}%s${NC}\n" "${selected_ssh}"
-          echo ""
-
-          # Check tunnel status
-          local ssh_pids=$(pgrep -f "ssh.*-N.*${selected_host}" 2>/dev/null || true)
-
-          if [[ -n "$ssh_pids" ]]; then
-            local ssh_pid=$(echo "$ssh_pids" | tr -d '\n' | awk '{print $1}')
-            echo -e "${BOLD}Tunnel Status:${NC} ${GREEN}● Active${NC} (PID: ${ssh_pid})"
+            press_enter
+            ;;
+          2) # Stop
             echo ""
-
-            # Extract and display port mappings
-            local ssh_cmd=$(ps -p "$ssh_pid" -o args= 2>/dev/null || echo "")
-            local -a mappings=()
-            while IFS= read -r mapping; do
-              [[ -n "$mapping" ]] && mappings+=("$mapping")
-            done < <(echo "$ssh_cmd" | grep -oE '\-L [0-9]+:localhost:[0-9]+' | sed 's/-L //' || true)
-
-            if [[ ${#mappings[@]} -gt 0 ]]; then
+            echo "Stopping tunnel..."
+            pkill -f "ssh.*-N.*${selected_host}" 2>/dev/null || true
+            echo -e "${GREEN}✓ Tunnel stopped${NC}"
+            press_enter
+            ;;
+          3) # Restart All (Tunnel + Compose)
+            echo ""
+            echo -e "${YELLOW}Restarting everything for ${selected_host}...${NC}"
+            
+            # 1. Stop Tunnel
+            pkill -f "ssh.*-N.*${selected_host}" 2>/dev/null || true
+            
+            # 2. Find and Restart all non-swarm compose projects on remote
+            # We exclude anything in /stacks or named stack*.yml
+            echo "Stopping non-swarm Docker projects on remote..."
+            local remote_cmd="find . -maxdepth 5 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) \
+              ! -path '*/stacks/*' ! -name 'stack*' | while read f; do \
+                echo \"Restarting project: \$f\"; \
+                docker compose -f \"\$f\" down || true; \
+                docker compose -f \"\$f\" up -d || true; \
+              done"
+            
+            ssh "$selected_ssh" "bash -l -c \"$remote_cmd\""
+            
+            # 3. Start Tunnel
+            echo ""
+            echo "Starting SSH tunnel..."
+            REMOTE_SSH="$selected_ssh"
+            REMOTE_HOST="$selected_host"
+            tunnel_start
+            press_enter
+            ;;
+          4) # Details
+            clear
+            print_header
+            echo -e "${BOLD}Tunnel Details: ${selected_name} (${selected_host})${NC}"
+            echo ""
+            # ... (details logic similar to original case 4 but simplified)
+            local ssh_pid=$(pgrep -f "ssh.*-N.*${selected_host}" | head -1)
+            if [[ -n "$ssh_pid" ]]; then
+              local ssh_cmd=$(ps -p "$ssh_pid" -o args= 2>/dev/null || echo "")
               echo -e "${BOLD}Port Mappings:${NC}"
               printf "  ${BOLD}%-15s %-15s %s${NC}\n" "Local Port" "Remote Port" "Status"
               echo "  ──────────────────────────────────────────────"
-
-              for mapping in "${mappings[@]}"; do
-                local local_port=$(echo "$mapping" | cut -d: -f1)
-                local remote_port=$(echo "$mapping" | cut -d: -f3)
-                printf "  %-15s %-15s ${GREEN}%s${NC}\n" "$local_port" "$remote_port" "✓ Active"
-              done
-
-              echo ""
-              echo -e "  ${GREEN}✓ All ${#mappings[@]} ports forwarded${NC}"
-            else
-              echo -e "${YELLOW}No port mappings found${NC}"
-            fi
-          else
-            echo -e "${BOLD}Tunnel Status:${NC} ${DIM}○ Inactive${NC}"
-            echo ""
-
-            # Show what would be mapped if started
-            local mappings=$(generate_tunnel_mappings "$selected_ssh" 2>/dev/null) || true
-            if [[ -n "$mappings" ]]; then
-              local -a mapping_array=()
               while IFS= read -r mapping; do
-                [[ -n "$mapping" ]] && mapping_array+=("$mapping")
-              done <<< "$mappings"
-
-              echo -e "${BOLD}Available Ports (if started):${NC}"
-              printf "  ${BOLD}%-15s %-15s %s${NC}\n" "Local Port" "Remote Port" "Status"
-              echo "  ──────────────────────────────────────────────"
-
-              for mapping in "${mapping_array[@]}"; do
-                local local_port=$(echo "$mapping" | cut -d: -f1)
-                local remote_port=$(echo "$mapping" | cut -d: -f3)
-                printf "  %-15s %-15s ${CYAN}%s${NC}\n" "$local_port" "$remote_port" "○ Ready"
-              done
-
-              echo ""
-              echo -e "  ${CYAN}${#mapping_array[@]} ports ready to forward${NC}"
+                if [[ -n "$mapping" ]]; then
+                  local lp=$(echo "$mapping" | cut -d: -f1)
+                  local rp=$(echo "$mapping" | cut -d: -f3)
+                  printf "  %-15s %-15s ${GREEN}%s${NC}\n" "$lp" "$rp" "✓ Active"
+                fi
+              done < <(echo "$ssh_cmd" | grep -oE -- '-L [0-9]+:localhost:[0-9]+' | sed 's/-L //' || true)
             else
-              echo -e "${YELLOW}No ports found in local compose files${NC}"
+              echo -e "${DIM}No port mappings active (tunnel is down)${NC}"
             fi
-          fi
-        else
-          echo -e "${RED}Invalid host number${NC}"
-        fi
-        press_enter
-        ;;
-
-      0|"") return ;;
-      *) echo "Invalid option"; sleep 1 ;;
-    esac
+            echo ""
+            press_enter
+            ;;
+          0|"") break ;;
+        esac
+      done
+    else
+      echo -e "${RED}Invalid selection${NC}"
+      sleep 1
+    fi
   done
 }

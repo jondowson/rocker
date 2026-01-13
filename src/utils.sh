@@ -81,7 +81,7 @@ smart_ssh_run() {
   local full_ctx="${script_content:-$cmd}"
   local f_args=""
   if [[ "$full_ctx" == *"docker compose"* ]]; then
-    f_args=$(echo "$full_ctx" | grep -oE "\-f [^[:space:]]+" | tr '\n' ' ')
+    f_args=$(echo "$full_ctx" | grep -oE -- "-f [^[:space:]]+" | tr '\n' ' ')
   fi
 
   # 2. Execute original command

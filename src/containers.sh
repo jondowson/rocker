@@ -34,12 +34,12 @@ view_project_info_menu() {
   fi
 
   # Parse the output
-  local machine_type=$(echo "$ctx_output" | grep "Context:" | grep -q "local" && echo "Local" || echo "Remote: ${REMOTE_HOST}")
-  local project_dir=$(echo "$ctx_output" | grep "Project dir" | cut -d: -f2- | xargs)
-  local docker_engine=$(echo "$ctx_output" | grep "Docker engine" | cut -d: -f2- | xargs)
-  local colima_profile=$(echo "$ctx_output" | grep "Colima profile" | cut -d: -f2- | xargs)
-  local docker_context=$(echo "$ctx_output" | grep "Docker context:" | cut -d: -f2- | xargs)
-  local active_context=$(echo "$ctx_output" | grep "Current Docker context:" -A1 | tail -1 | xargs)
+  local machine_type=$(echo "$ctx_output" | grep -E -- "Context:" | grep -q -- "local" && echo "Local" || echo "Remote: ${REMOTE_HOST}")
+  local project_dir=$(echo "$ctx_output" | grep -E -- "Project dir" | cut -d: -f2- | xargs)
+  local docker_engine=$(echo "$ctx_output" | grep -E -- "Docker engine" | cut -d: -f2- | xargs)
+  local colima_profile=$(echo "$ctx_output" | grep -E -- "Colima profile" | cut -d: -f2- | xargs)
+  local docker_context=$(echo "$ctx_output" | grep -E -- "Docker context:" | cut -d: -f2- | xargs)
+  local active_context=$(echo "$ctx_output" | grep -E -- "Current Docker context:" -A1 | tail -1 | xargs)
 
   # Draw table
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -217,7 +217,7 @@ view_all_containers_menu() {
           local remote_port=$(echo "$mapping" | cut -d: -f3)
           tunnel_port_map[$remote_port]=$local_port
         fi
-      done < <(echo "$ssh_cmd" | grep -oE '\-L [0-9]+:localhost:[0-9]+' | sed 's/-L //' || true)
+      done < <(echo "$ssh_cmd" | grep -oE -- '-L [0-9]+:localhost:[0-9]+' | sed 's/-L //' || true)
     fi
 
     # Get remote containers using current (remote) context
@@ -228,16 +228,16 @@ view_all_containers_menu() {
         if [[ -n "$ports_raw" ]]; then
           # Extract the HOST port (the one matched after the colon and before the arrow)
           # Format: 0.0.0.0:8088->80/tcp -> we want 8088. We use sed to clean up.
-          local host_port=$(echo "$ports_raw" | grep -oE ':[0-9]+->' | head -1 | sed 's/[:>-]//g' || echo "")
+          local host_port=$(echo "$ports_raw" | grep -oE -- ':[0-9]+->' | head -1 | sed 's/[:>-]//g' || echo "")
           
           if [[ -z "$host_port" ]]; then
             # Fallback: if no mapped host port (just exposed), extract the port number
             # We strip common IP prefixes first to avoid picking up '0' from '0.0.0.0'
-            host_port=$(echo "$ports_raw" | sed 's/0\.0\.0\.0//g; s/\[::\]//g' | grep -oE '[0-9]+' | head -1 || echo "-")
+            host_port=$(echo "$ports_raw" | sed 's/0\.0\.0\.0//g; s/\[::\]//g' | grep -oE -- '[0-9]+' | head -1 || echo "-")
           fi
 
           # Extract the CONTAINER port for display as the 'Remote Port'
-          local container_port=$(echo "$ports_raw" | grep -oE '->[0-9]+' | head -1 | sed 's/->//' || echo "-")
+          local container_port=$(echo "$ports_raw" | grep -oE -- '->[0-9]+' | head -1 | sed 's/->//' || echo "-")
 
           # Check if this host port is tunneled (use :- to avoid unbound variable error with set -u)
           local local_port="${tunnel_port_map[$host_port]:-}"

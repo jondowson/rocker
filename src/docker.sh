@@ -174,7 +174,7 @@ select_docker_context_menu() {
           local ctx_info="${remote_contexts[$i]}"
           local ctx_name="${remote_context_names[$i]}"
           # Check if this is the current context
-          if echo "$ctx_info" | grep -q '\*'; then
+          if echo "$ctx_info" | grep -q -- '\*'; then
             echo -e "${GREEN}$idx) $ctx_name (current)${NC}"
           else
             echo "$idx) $ctx_name"

@@ -35,11 +35,11 @@ headless_menu() {
     fi
 
     # Parse status information
-    local sleep_setting=$(echo "$status_output" | grep "^\s*sleep\s" | awk '{print $2}')
-    local displaysleep_setting=$(echo "$status_output" | grep "^\s*displaysleep\s" | awk '{print $2}')
-    local disksleep_setting=$(echo "$status_output" | grep "^\s*disksleep\s" | awk '{print $2}')
-    local ssh_status=$(echo "$status_output" | grep -A1 "SSH Remote Login" | tail -1)
-    local caff_status=$(echo "$status_output" | grep -A1 "Caffeinate" | tail -1)
+    local sleep_setting=$(echo "$status_output" | grep -- "^\s*sleep\s" | awk '{print $2}')
+    local displaysleep_setting=$(echo "$status_output" | grep -- "^\s*displaysleep\s" | awk '{print $2}')
+    local disksleep_setting=$(echo "$status_output" | grep -- "^\s*disksleep\s" | awk '{print $2}')
+    local ssh_status=$(echo "$status_output" | grep -A1 -- "SSH Remote Login" | tail -1)
+    local caff_status=$(echo "$status_output" | grep -A1 -- "Caffeinate" | tail -1)
 
     # Determine if full headless is enabled (all sleep settings = 0)
     local full_headless="Disabled"
@@ -59,8 +59,8 @@ headless_menu() {
     printf "%-30s ${full_headless_color}%-20s${NC} %s\n" "Full Headless Mode" "$full_headless" "pmset sleep prevention (sudo)"
 
     # Caffeinate status
-    if echo "$caff_status" | grep -q "✓.*running"; then
-      local caff_pid=$(echo "$caff_status" | grep -oE 'pid [0-9]+' | awk '{print $2}')
+    if echo "$caff_status" | grep -q -- "✓.*running"; then
+      local caff_pid=$(echo "$caff_status" | grep -oE -- 'pid [0-9]+' | awk '{print $2}')
       printf "%-30s ${GREEN}%-20s${NC} %s\n" "Caffeinate" "Running (PID: $caff_pid)" "Process-level (no sudo)"
     else
       printf "%-30s ${YELLOW}%-20s${NC} %s\n" "Caffeinate" "Not running" "Separate lightweight option"
@@ -74,7 +74,7 @@ headless_menu() {
     fi
 
     # SSH status
-    if echo "$ssh_status" | grep -qi "on\|running\|enabled"; then
+    if echo "$ssh_status" | grep -qi -- "on\|running\|enabled"; then
       printf "%-30s ${GREEN}%-20s${NC} %s\n" "SSH Remote Login" "Enabled" "Can connect remotely"
     else
       printf "%-30s ${YELLOW}%-20s${NC} %s\n" "SSH Remote Login" "Unknown" "Cannot verify status"
@@ -111,7 +111,7 @@ headless_menu() {
             echo -e "${GREEN}✓ Headless mode enabled${NC}"
             echo ""
             echo "Verifying status..."
-            ssh "$REMOTE_SSH" "pmset -g | grep -E 'sleep|disablesleep'"
+            ssh "$REMOTE_SSH" "pmset -g | grep -E -- 'sleep|disablesleep'"
           else
             echo ""
             echo -e "${RED}✗ Failed to enable headless mode${NC}"
@@ -128,7 +128,7 @@ headless_menu() {
             echo -e "${GREEN}✓ Headless mode disabled${NC}"
             echo ""
             echo "Verifying status..."
-            ssh "$REMOTE_SSH" "pmset -g | grep -E 'sleep|disablesleep'"
+            ssh "$REMOTE_SSH" "pmset -g | grep -E -- 'sleep|disablesleep'"
           else
             echo ""
             echo -e "${RED}✗ Failed to disable headless mode${NC}"

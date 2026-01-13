@@ -232,6 +232,7 @@ view_all_containers_menu() {
 
         if [[ -n "$ports_raw" ]]; then
           # Extract all ports from ports_raw (handles multiple and ranges)
+          declare -A seen_ports
           while IFS= read -r p_entry; do
             [[ -n "$p_entry" ]] || continue
             # Extract host part: after colon, before arrow
@@ -242,14 +243,18 @@ view_all_containers_menu() {
               local end=$(echo "$h_part" | cut -d- -f2)
               if [[ "$start" =~ ^[0-9]+$ ]] && [[ "$end" =~ ^[0-9]+$ ]]; then
                 for ((p=start; p<=end; p++)); do
-                  local lp="${tunnel_port_map[$p]:-}"
-                  host_ports="${host_ports}${p}, "
-                  if [[ -n "$lp" ]]; then
-                    local_ports="${local_ports}${lp}, "
-                    is_tunneled=true
-                    [[ -z "$first_url" ]] && first_url="http://localhost:$lp"
-                  else
-                    local_ports="${local_ports}?, "
+                  # De-duplicate: only process this port if not seen before for this container
+                  if [[ -z "${seen_ports[$p]:-}" ]]; then
+                    seen_ports[$p]=1
+                    local lp="${tunnel_port_map[$p]:-}"
+                    host_ports="${host_ports}${p}, "
+                    if [[ -n "$lp" ]]; then
+                      local_ports="${local_ports}${lp}, "
+                      is_tunneled=true
+                      [[ -z "$first_url" ]] && first_url="http://localhost:$lp"
+                    else
+                      local_ports="${local_ports}?, "
+                    fi
                   fi
                 done
               fi
@@ -257,14 +262,18 @@ view_all_containers_menu() {
               # Single port
               local hp=$(echo "$h_part" | grep -oE -- '^[0-9]+$' || echo "")
               if [[ -n "$hp" ]]; then
-                local lp="${tunnel_port_map[$hp]:-}"
-                host_ports="${host_ports}${hp}, "
-                if [[ -n "$lp" ]]; then
-                  local_ports="${local_ports}${lp}, "
-                  is_tunneled=true
-                  [[ -z "$first_url" ]] && first_url="http://localhost:$lp"
-                else
-                  local_ports="${local_ports}?, "
+                # De-duplicate
+                if [[ -z "${seen_ports[$hp]:-}" ]]; then
+                  seen_ports[$hp]=1
+                  local lp="${tunnel_port_map[$hp]:-}"
+                  host_ports="${host_ports}${hp}, "
+                  if [[ -n "$lp" ]]; then
+                    local_ports="${local_ports}${lp}, "
+                    is_tunneled=true
+                    [[ -z "$first_url" ]] && first_url="http://localhost:$lp"
+                  else
+                    local_ports="${local_ports}?, "
+                  fi
                 fi
               fi
             fi

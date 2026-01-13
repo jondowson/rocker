@@ -225,18 +225,24 @@ view_all_containers_menu() {
     if [[ -n "$remote_containers" ]]; then
       while IFS='|' read -r name ports_raw; do
         remote_containers_found=true
-        # Parse remote port
-        local remote_port=$(echo "$ports_raw" | grep -oE '[0-9]+->([0-9]+)' | head -1 | cut -d'>' -f2)
+        if [[ -n "$ports_raw" ]]; then
+          # Extract the HOST port (the one matched after the colon and before the arrow)
+          # Format: 0.0.0.0:8088->80/tcp -> we want 8088
+          local host_port=$(echo "$ports_raw" | grep -oE ':[0-9]+->' | head -1 | grep -oE '[0-9]+' || echo "")
+          
+          if [[ -z "$host_port" ]]; then
+            # Fallback: if no mapped host port, show the port as-is (just exposed)
+            host_port=$(echo "$ports_raw" | grep -oE '[0-9]+' | head -1 || echo "-")
+          fi
 
-        if [[ -n "$remote_port" ]]; then
-          # Check if this port is tunneled (use :- to avoid unbound variable error with set -u)
-          local local_port="${tunnel_port_map[$remote_port]:-}"
+          # Check if this host port is tunneled (use :- to avoid unbound variable error with set -u)
+          local local_port="${tunnel_port_map[$host_port]:-}"
           if [[ -n "$local_port" ]]; then
             printf "${GREEN}%-30s${NC} %-15s ${CYAN}%-15s${NC} ${CYAN}%s${NC}\n" \
-              "$name" "$remote_port" "$local_port" "http://localhost:$local_port"
+              "$name" "$host_port" "$local_port" "http://localhost:$local_port"
           else
             printf "${GREEN}%-30s${NC} %-15s ${YELLOW}%-15s${NC} ${YELLOW}%s${NC}\n" \
-              "$name" "$remote_port" "(not tunneled)" "-"
+              "$name" "$host_port" "(not tunneled)" "-"
           fi
         else
           printf "${GREEN}%-30s${NC} %-15s %-15s %s\n" \

@@ -176,19 +176,13 @@ discover_remote_ports() {
   return 0
 }
 
-# Discover ALL compose files recursively and extract their ports, plus check for locally listening ports
+# Discover ALL compose files recursively and extract their ports
 discover_all_local_ports() {
   {
+    local -a files_to_scan=()
     # If we have selected compose files, use only those
     if [[ ${#SELECTED_COMPOSE_FILES[@]} -gt 0 ]]; then
-      for compose_file in "${SELECTED_COMPOSE_FILES[@]}"; do
-        [[ ! -f "$compose_file" ]] && continue
-
-        # Extract ports from compose file
-        grep -E '^[[:space:]]*-[[:space:]]*"?[0-9]+:[0-9]+"?' "$compose_file" 2>/dev/null | \
-          sed -E 's/^[[:space:]]*-[[:space:]]*"?([0-9]+):[0-9]+.*/\1/' | \
-          awk '$1 >= 1024 && $1 <= 65535 {print $1}' || true
-      done
+      files_to_scan=("${SELECTED_COMPOSE_FILES[@]}")
     else
       # Fallback: search in project or namespace directory
       local search_path="${LOCAL_ROOT_DIR}"
@@ -200,22 +194,28 @@ discover_all_local_ports() {
       fi
 
       # Find all compose files in search path
-      local compose_files=$(find "${search_path}" -maxdepth 5 -type f \( -name "compose.yml" -o -name "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) 2>/dev/null || true)
-
-      if [[ -n "$compose_files" ]]; then
-        for compose_file in $compose_files; do
-          grep -E '^[[:space:]]*-[[:space:]]*"?[0-9]+:[0-9]+"?' "$compose_file" 2>/dev/null | \
-            sed -E 's/^[[:space:]]*-[[:space:]]*"?([0-9]+):[0-9]+.*/\1/' | \
-            awk '$1 >= 1024 && $1 <= 65535 {print $1}' || true
-        done
-      fi
+      while IFS= read -r f; do
+        [[ -n "$f" ]] && files_to_scan+=("$f")
+      done < <(find "${search_path}" -maxdepth 5 -type f \( -name "compose.yml" -o -name "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) 2>/dev/null || true)
     fi
 
-    # Also get ports from running containers
+    for compose_file in "${files_to_scan[@]}"; do
+      [[ ! -f "$compose_file" ]] && continue
+      
+      # Extract ports using a more robust regex that handles:
+      # - "8080:8080"
+      # - 8080:8080
+      # - "127.0.0.1:8080:80"
+      # We extract the HOST port (the one before the last colon)
+      grep -E '^[[:space:]]*-([[:space:]]|")[0-9.:]+:[0-9]+' "$compose_file" 2>/dev/null | \
+        sed -E 's/.*[[:space:]]*-([[:space:]]|")//; s/[" ]//g; s/.*:([0-9]+):[0-9]+/\1/; s/([0-9]+):[0-9]+/\1/' | \
+        grep -oE '^[0-9]+$' || true
+    done
+
+    # Also get ports from running containers (local)
     docker ps --format '{{.Ports}}' 2>/dev/null | \
-      grep -oE '0\.0\.0\.0:[0-9]+' | \
-      grep -oE '[0-9]+' | \
-      awk '$1 >= 1024 && $1 <= 65535 {print $1}' || true
+      grep -oE '0\.0\.0\.0:[0-9]+|:[0-9]+->' | \
+      grep -oE '[0-9]+' || true
   } | sort -u -n || true
 
   return 0

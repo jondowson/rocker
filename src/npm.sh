@@ -211,7 +211,8 @@ npm_commands_menu() {
       # Otherwise use full quoted path
       remote_project_dir="\"$project_dir\""
     fi
-    ssh -t "$REMOTE_SSH" "cd $remote_project_dir && npm run $cmd_name"
+    # Run on remote host using a login shell to ensure environment (PATH, nvm, etc.) is loaded
+    ssh -t "$REMOTE_SSH" "bash -l -c 'cd $remote_project_dir && npm run $cmd_name'"
   else
     echo -e "${CYAN}Running locally: npm run $cmd_name${NC}"
     echo ""

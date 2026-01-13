@@ -229,8 +229,8 @@ view_all_containers_menu() {
         local remote_port=$(echo "$ports_raw" | grep -oE '[0-9]+->([0-9]+)' | head -1 | cut -d'>' -f2)
 
         if [[ -n "$remote_port" ]]; then
-          # Check if this port is tunneled
-          local local_port="${tunnel_port_map[$remote_port]}"
+          # Check if this port is tunneled (use :- to avoid unbound variable error with set -u)
+          local local_port="${tunnel_port_map[$remote_port]:-}"
           if [[ -n "$local_port" ]]; then
             printf "${GREEN}%-30s${NC} %-15s ${CYAN}%-15s${NC} ${CYAN}%s${NC}\n" \
               "$name" "$remote_port" "$local_port" "http://localhost:$local_port"

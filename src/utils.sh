@@ -65,68 +65,76 @@ press_enter() {
 }
 
 # Smart SSH execution with automatic recovery for common errors
-# Detects "network not found" errors and tries to recover by resetting the relevant Docker Compose stack (if applicable)
+# Proactively checks for networking issues and handles "network not found" errors
 smart_ssh_run() {
   local remote_ssh="$1"
   local remote_dir="$2"
   local cmd="$3"
 
-  # Use a temporary file to capture output for analysis
+  local resolved_cmd="$cmd"
+  
+  # 1. RESOLVE NPM SCRIPTS (if applicable)
+  if [[ "$cmd" =~ ^npm\ run\ ([^[:space:]]+) ]]; then
+    local script_name="${BASH_REMATCH[1]}"
+    local remote_resolve_cmd="jq -r '.scripts[\"$script_name\"] // \"\"' package.json"
+    resolved_cmd=$(ssh "$remote_ssh" "bash -l -c 'cd $remote_dir && $remote_resolve_cmd'" 2>/dev/null || echo "")
+  fi
+
+  # 2. PROACTIVE HEALTH CHECK
+  # If we're doing a "up" or "run" or "restart", check for stale containers first
+  if [[ "$resolved_cmd" == *"docker compose"* ]] && [[ "$resolved_cmd" =~ (up|start|restart) ]]; then
+    # Extract all -f arguments to target the correct compose stack
+    local f_args=$(echo "$resolved_cmd" | grep -oE "\-f [^[:space:]]+" | tr '\n' ' ')
+    
+    # Check if any container in this stack is in a broken state
+    # We look for "failed to set up container networking" in the container's error log
+    local broken_containers=$(ssh "$remote_ssh" "bash -l -c \"cd $remote_dir && \
+      docker compose $f_args ps -a --format json\"" 2>/dev/null | jq -r 'select(.State == "exited" or .State == "created") | .Name' || echo "")
+    
+    if [[ -z "$broken_containers" ]]; then
+       # Fallback: check project wide if ID-based compose ps didn't work
+       broken_containers=$(ssh "$remote_ssh" "docker ps -a --filter 'status=exited' --filter 'status=created' --format '{{.Names}}'" 2>/dev/null)
+    fi
+
+    if [[ -n "$broken_containers" ]]; then
+      # Test one broken container for the specific networking error
+      for container in $broken_containers; do
+        if ssh "$remote_ssh" "docker inspect $container --format '{{.State.Error}}'" 2>/dev/null | grep -qi "network.*not found"; then
+          echo -e "${YELLOW}⚠️  Proactive check detected stale Docker network for: $container${NC}"
+          echo -e "${CYAN}   Refreshing environment for a clean slate...${NC}"
+          ssh "$remote_ssh" "bash -l -c 'cd $remote_dir && docker compose $f_args down'" >/dev/null 2>&1
+          break
+        fi
+      done
+    fi
+  fi
+
+  # 3. EXECUTE ORIGINAL COMMAND
   local output_file=$(mktemp /tmp/rocker_output.XXXXXX)
   local clean_file=$(mktemp /tmp/rocker_clean.XXXXXX)
   local exit_code=0
 
-  # Execute command with a login shell, capturing both stdout and stderr
   ssh -t "$remote_ssh" "bash -l -c 'cd $remote_dir && $cmd'" 2>&1 | tee "$output_file"
   exit_code=${PIPESTATUS[0]}
 
-  # Pre-clean the output for matching: remove ANSI, \r, and non-printable chars
+  # 4. REACTIVE FALLBACK (if proactive check missed it or TTY noise masked it)
   tr -cd '\11\12\40-\176' < "$output_file" | sed 's/\r//g' > "$clean_file"
 
   if [[ $exit_code -ne 0 ]]; then
-    # DEBUG: Show detection attempt
-    # echo -e "${CYAN}   Checking for networking errors in output...${NC}"
-
-    # Check for specific "network not found" error
-    # We look for "network" and "not found" in the same line, which is very robust
     if grep -qi "network" "$clean_file" && grep -qi "not found" "$clean_file"; then
       echo ""
-      echo -e "${YELLOW}⚠️  Detected potential Docker networking issue. Attempting automatic recovery...${NC}"
+      echo -e "${YELLOW}⚠️  Detected networking issue during execution. Attempting recovery...${NC}"
       
-      # Determine the appropriate recovery action
-      local resolved_cmd="$cmd"
       local recovery_cmd=""
-      
-      # If it's an npm run command, try to resolve the actual script content from package.json
-      if [[ "$cmd" =~ ^npm\ run\ ([^[:space:]]+) ]]; then
-        local script_name="${BASH_REMATCH[1]}"
-        echo -e "${CYAN}   Resolving script '$script_name' from package.json...${NC}"
-        
-        # Use jq on remote to find the script definition
-        local remote_resolve_cmd="jq -r '.scripts[\"$script_name\"] // \"\"' package.json"
-        resolved_cmd=$(ssh "$remote_ssh" "bash -l -c 'cd $remote_dir && $remote_resolve_cmd'" 2>/dev/null || echo "")
-        
-        if [[ -n "$resolved_cmd" ]]; then
-           echo -e "${CYAN}   Resolved to: $resolved_cmd${NC}"
-        fi
-      fi
-
-      # If the original or resolved command contains "docker compose", extract -f flags
       if [[ "$resolved_cmd" == *"docker compose"* ]]; then
-        # Extract all -f arguments to target the correct compose stack
         local f_args=$(echo "$resolved_cmd" | grep -oE "\-f [^[:space:]]+" | tr '\n' ' ')
         recovery_cmd="docker compose $f_args down"
-        echo -e "${CYAN}   Performing targeted recovery: $recovery_cmd${NC}"
       else
-        # Generic fallback
         recovery_cmd="docker compose down"
-        echo -e "${CYAN}   No specific compose context found. Performing generic recovery: $recovery_cmd${NC}"
       fi
       
-      # Execute recovery on remote host
       ssh "$remote_ssh" "bash -l -c 'cd $remote_dir && ($recovery_cmd || true)'" >/dev/null 2>&1
-      
-      echo -e "${CYAN}   Recovery complete. Retrying original command...${NC}"
+      echo -e "${CYAN}   Retrying...${NC}"
       echo ""
       ssh -t "$remote_ssh" "bash -l -c 'cd $remote_dir && $cmd'"
       exit_code=$?

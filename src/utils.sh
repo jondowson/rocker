@@ -73,6 +73,7 @@ smart_ssh_run() {
 
   # Use a temporary file to capture output for analysis
   local output_file=$(mktemp /tmp/rocker_output.XXXXXX)
+  local clean_file=$(mktemp /tmp/rocker_clean.XXXXXX)
   local exit_code=0
 
   # Execute command with a login shell, capturing both stdout and stderr
@@ -80,9 +81,13 @@ smart_ssh_run() {
   ssh -t "$remote_ssh" "bash -l -c 'cd $remote_dir && $cmd'" 2>&1 | tee "$output_file"
   exit_code=${PIPESTATUS[0]}
 
+  # Post-process output to remove TTY/ANSI noise for cleaner matching
+  # This strips ANSI escape codes and carriage returns
+  sed -e 's/\x1b\[[0-9;]*[mK]//g' -e 's/\r//g' "$output_file" > "$clean_file"
+
   if [[ $exit_code -ne 0 ]]; then
-    # Check for specific "network not found" error (be robust against \r and colors)
-    if grep -aiE "failed to set up container networking.*network.*not found" "$output_file" >/dev/null 2>&1; then
+    # Check for specific "network not found" error
+    if grep -qiE "failed to set up container networking.*network.*not found" "$clean_file"; then
       echo ""
       echo -e "${YELLOW}⚠️  Detected stale Docker networking issue. Attempting automatic recovery...${NC}"
       
@@ -106,6 +111,7 @@ smart_ssh_run() {
       # If the original or resolved command contains "docker compose", extract -f flags
       if [[ "$resolved_cmd" == *"docker compose"* ]]; then
         # Extract all -f arguments to target the correct compose stack
+        # Use a more robust extraction that handles spaces or multiple files
         local f_args=$(echo "$resolved_cmd" | grep -oE "\-f [^[:space:]]+" | tr '\n' ' ')
         recovery_cmd="docker compose $f_args down"
         echo -e "${CYAN}   Running targeted recovery: $recovery_cmd${NC}"
@@ -118,13 +124,13 @@ smart_ssh_run() {
       # Execute recovery on remote host
       ssh "$remote_ssh" "bash -l -c 'cd $remote_dir && ($recovery_cmd || true)'" >/dev/null 2>&1
       
-      echo -e "${CYAN}   Retrying original command...${NC}"
+      echo -e "${CYAN}   Recovery complete. Retrying original command...${NC}"
       echo ""
       ssh -t "$remote_ssh" "bash -l -c 'cd $remote_dir && $cmd'"
       exit_code=$?
     fi
   fi
 
-  rm -f "$output_file"
+  rm -f "$output_file" "$clean_file"
   return $exit_code
 }

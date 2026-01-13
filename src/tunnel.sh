@@ -473,14 +473,11 @@ tunnel_menu() {
             # 2. Find and Restart all non-swarm compose projects on remote
             # We exclude anything in /stacks or named stack*.yml
             echo "Stopping non-swarm Docker projects on remote..."
-            local remote_cmd="find . -maxdepth 5 -type f \( -name 'compose.yml' -o -name 'compose.yaml' -o -name 'docker-compose.yml' -o -name 'docker-compose.yaml' \) \
-              ! -path '*/stacks/*' ! -name 'stack*' | while read f; do \
-                echo \"Restarting project: \$f\"; \
-                docker compose -f \"\$f\" down || true; \
-                docker compose -f \"\$f\" up -d || true; \
-              done"
+            # Use single quotes for the main command string to avoid local expansion
+            # and double quotes inside for filenames/patterns.
+            local remote_cmd='find . -maxdepth 5 -type f \( -name "compose.yml" -o -name "compose.yaml" -o -name "docker-compose.yml" -o -name "docker-compose.yaml" \) ! -path "*/stacks/*" ! -name "stack*" | while read f; do echo "Restarting project: $f"; docker compose -f "$f" down || true; docker compose -f "$f" up -d || true; done'
             
-            ssh "$selected_ssh" "bash -l -c \"$remote_cmd\""
+            ssh "$selected_ssh" "bash -l -c '$remote_cmd'"
             
             # 3. Start Tunnel
             echo ""

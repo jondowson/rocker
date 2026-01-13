@@ -87,16 +87,30 @@ smart_ssh_run() {
       echo -e "${YELLOW}⚠️  Detected stale Docker networking issue. Attempting automatic recovery...${NC}"
       
       # Determine the appropriate recovery action
+      local resolved_cmd="$cmd"
       local recovery_cmd=""
       
-      # If it's a docker compose command, try to extract its specific context
-      if [[ "$cmd" == *"docker compose"* ]]; then
+      # If it's an npm run command, try to resolve the actual script content from package.json
+      if [[ "$cmd" =~ ^npm\ run\ ([^[:space:]]+) ]]; then
+        local script_name="${BASH_REMATCH[1]}"
+        echo -e "${CYAN}   Resolving script '$script_name' from package.json...${NC}"
+        # Use jq on remote to find the script definition
+        local remote_resolve_cmd="jq -r '.scripts[\"$script_name\"] // \"\"' package.json"
+        resolved_cmd=$(ssh "$remote_ssh" "bash -l -c 'cd $remote_dir && $remote_resolve_cmd'" 2>/dev/null || echo "")
+        
+        if [[ -n "$resolved_cmd" ]]; then
+           echo -e "${CYAN}   Resolved to: $resolved_cmd${NC}"
+        fi
+      fi
+
+      # If the original or resolved command contains "docker compose", extract -f flags
+      if [[ "$resolved_cmd" == *"docker compose"* ]]; then
         # Extract all -f arguments to target the correct compose stack
-        local f_args=$(echo "$cmd" | grep -oE "\-f [^[:space:]]+" | tr '\n' ' ')
+        local f_args=$(echo "$resolved_cmd" | grep -oE "\-f [^[:space:]]+" | tr '\n' ' ')
         recovery_cmd="docker compose $f_args down"
-        echo -e "${CYAN}   Identified Docker Compose context. Running recovery: $recovery_cmd${NC}"
+        echo -e "${CYAN}   Running targeted recovery: $recovery_cmd${NC}"
       else
-        # Generic fallback for other docker commands
+        # Generic fallback for other situations
         recovery_cmd="docker compose down"
         echo -e "${CYAN}   No specific compose context found. Running generic recovery: $recovery_cmd${NC}"
       fi

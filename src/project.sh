@@ -196,6 +196,7 @@ discover_all_local_ports() {
     fi
 
     for compose_file in "${files_to_scan[@]}"; do
+      # Always read compose files locally since Development folder is synced
       [[ ! -f "$compose_file" ]] && continue
       # Robust extraction: handle IP:HOST:CONT, HOST:CONT, comments, and ranges
       grep -E -- '^[[:space:]]*-([[:space:]]|")[0-9.:-]+:[0-9-]+' "$compose_file" 2>/dev/null | \
@@ -236,7 +237,7 @@ discover_all_local_ports() {
 # Generate dynamic tunnel port mappings with conflict resolution
 generate_tunnel_mappings() {
   local remote_ssh="$1"
-  local -A port_usage
+  local port_usage=" "
   local -a tunnel_mappings=()
   local -a compose_ports=()
 
@@ -244,15 +245,15 @@ generate_tunnel_mappings() {
   while IFS= read -r port; do
     [[ -n "$port" ]] || continue
     compose_ports+=("$port")
-    port_usage[$port]="local:reserved"
+    port_usage="${port_usage}${port} "
   done < <(discover_all_local_ports)
 
   # Step 2: Reserve ports already used by active SSH tunnels
   # This prevents conflicts when running multiple remote tunnels simultaneously
   while IFS= read -r local_port; do
     [[ -n "$local_port" ]] || continue
-    port_usage[$local_port]="tunnel:active"
-  done < <(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep 'ssh' | grep -oE -- ':[0-9]+' | sed 's/://' | sort -u || true)
+    port_usage="${port_usage}${local_port} "
+  done < <(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -- 'ssh' | grep -oE -- ':[0-9]+' | sed 's/://' | sort -u || true)
 
   # Step 3: Create tunnel mappings for each compose port
   # Use compose file ports as the REMOTE ports, find available LOCAL ports
@@ -269,13 +270,13 @@ generate_tunnel_mappings() {
     fi
 
     # Find next available local port
-    while [[ -n "${port_usage[$local_port]:-}" ]]; do
+    while [[ "$port_usage" == *" $local_port "* ]]; do
       local_port=$((local_port + 1))
     done
 
     # Create mapping: local_port:localhost:remote_port
     tunnel_mappings+=("${local_port}:localhost:${remote_port}")
-    port_usage[$local_port]="remote:$remote_port"
+    port_usage="${port_usage}${local_port} "
   done
 
   # Return space-separated mappings
@@ -290,91 +291,10 @@ generate_tunnel_mappings() {
 # Port Conflict Validation & Auto-Fix (DEPRECATED - now dynamic)
 # ============================================================
 validate_and_fix_port_conflicts() {
-  local -A port_usage
-  local -A project_local_ports
-  local conflicts_found=false
-  local config_updated=false
-
-  # Step 1a: Reserve explicitly configured local ports
-  while IFS= read -r port; do
-    [[ -n "$port" ]] || continue
-    port_usage[$port]="local:reserved"
-  done < <(jq -r '.contexts[] | select(.type == "local" and .reserved_ports) | .reserved_ports[]' "$CONFIG_FILE" 2>/dev/null)
-
-  # Step 1b: Discover local ports from all projects' compose files
-  while IFS= read -r proj; do
-    [[ -n "$proj" ]] || continue
-    local ports=$(get_project_ports "$proj")
-    if [[ -n "$ports" ]]; then
-      project_local_ports[$proj]="$ports"
-      # Reserve these ports
-      for port in $ports; do
-        port_usage[$port]="local:$proj"
-      done
-    fi
-  done < <(discover_projects)
-
-  # Step 2: Check remote tunnel ports against reserved local ports
-  local -a contexts_to_fix=()
-  while IFS='|' read -r name ports; do
-    local needs_fix=false
-    for port_mapping in $ports; do
-      local local_port=$(echo "$port_mapping" | cut -d: -f1)
-
-      if [[ -n "${port_usage[$local_port]:-}" ]]; then
-        echo -e "${YELLOW}⚠️  Port conflict: ${local_port} reserved for ${port_usage[$local_port]}, but used by tunnel ${name}${NC}" >&2
-        conflicts_found=true
-        needs_fix=true
-      fi
-    done
-
-    if $needs_fix; then
-      contexts_to_fix+=("$name|$ports")
-    fi
-  done <<< ""  # DEPRECATED: Static tunnel_ports removed - now using dynamic discovery
-  # Original line: done < <(jq -r '.contexts[] | select(.type == "remote" and .tunnel_ports) | "\(.name)|\(.tunnel_ports | join(" "))"' "$CONFIG_FILE")
-
-  # Step 3: Auto-fix conflicts by incrementing ports
-  if $conflicts_found; then
-    echo "" >&2
-    echo -e "${CYAN}Auto-fixing port conflicts...${NC}" >&2
-
-    for entry in "${contexts_to_fix[@]}"; do
-      local ctx_name=$(echo "$entry" | cut -d'|' -f1)
-      local old_ports=$(echo "$entry" | cut -d'|' -f2)
-      local -a new_ports=()
-
-      for port_mapping in $old_ports; do
-        local local_port=$(echo "$port_mapping" | cut -d: -f1)
-        local remote_port=$(echo "$port_mapping" | cut -d: -f2)
-
-        # Find next available port
-        while [[ -n "${port_usage[$local_port]:-}" ]]; do
-          local_port=$((local_port + 1))
-        done
-
-        new_ports+=("${local_port}:${remote_port}")
-        port_usage[$local_port]="$ctx_name"
-        echo -e "  ${ctx_name}: ${port_mapping} → ${local_port}:${remote_port}" >&2
-      done
-
-      # Update config file
-      local new_ports_json=$(printf '%s\n' "${new_ports[@]}" | jq -R . | jq -s .)
-      jq --arg name "$ctx_name" --argjson ports "$new_ports_json" \
-        '(.contexts[] | select(.name == $name) | .tunnel_ports) = $ports' \
-        "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-
-      config_updated=true
-    done
-
-    if $config_updated; then
-      echo "" >&2
-      echo -e "${GREEN}✓ Configuration updated with conflict-free ports${NC}" >&2
-      echo -e "${CYAN}Reloading configuration...${NC}" >&2
-      sleep 2
-      exec "$0" "$@"  # Restart rocker with new config
-    fi
-  fi
+  # DEPRECATED: This function used associative arrays (not supported in Bash 3.2 on macOS)
+  # and static port conflict resolution which has been replaced by dynamic discovery.
+  # Kept as a placeholder if needed in future.
+  return 0
 }
 
 # Validate and auto-fix ports on startup (DISABLED - using dynamic discovery)

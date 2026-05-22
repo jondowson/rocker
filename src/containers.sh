@@ -220,8 +220,15 @@ view_all_containers_menu() {
       done < <(echo "$ssh_cmd" | grep -oE -- '-L [0-9]+:localhost:[0-9]+' | sed 's/-L //' || true)
     fi
 
-    # Get remote containers using current (remote) context
-    local remote_containers=$(docker ps --format "{{.Names}}|{{.Ports}}" 2>/dev/null)
+    # Get remote containers by SSHing into the remote machine
+    # Use REMOTE_SSH if available, otherwise construct from context
+    local ssh_target="$REMOTE_SSH"
+    if [[ -z "$ssh_target" ]]; then
+      # Extract user@host from docker endpoint
+      ssh_target=$(echo "$docker_endpoint" | sed -E 's|ssh://([^:]+).*|\1|')
+    fi
+
+    local remote_containers=$(ssh "$ssh_target" "docker ps --format '{{.Names}}|{{.Ports}}'" 2>/dev/null)
     if [[ -n "$remote_containers" ]]; then
       while IFS='|' read -r name ports_raw; do
         remote_containers_found=true
@@ -232,7 +239,7 @@ view_all_containers_menu() {
 
         if [[ -n "$ports_raw" ]]; then
           # Extract all ports from ports_raw (handles multiple and ranges)
-          declare -A seen_ports
+          local seen_ports=" "
           while IFS= read -r p_entry; do
             [[ -n "$p_entry" ]] || continue
             # Extract host part: after colon, before arrow
@@ -244,8 +251,8 @@ view_all_containers_menu() {
               if [[ "$start" =~ ^[0-9]+$ ]] && [[ "$end" =~ ^[0-9]+$ ]]; then
                 for ((p=start; p<=end; p++)); do
                   # De-duplicate: only process this port if not seen before for this container
-                  if [[ -z "${seen_ports[$p]:-}" ]]; then
-                    seen_ports[$p]=1
+                  if [[ "$seen_ports" != *" $p "* ]]; then
+                    seen_ports="${seen_ports}$p "
                     local lp="${tunnel_port_map[$p]:-}"
                     host_ports="${host_ports}${p}, "
                     if [[ -n "$lp" ]]; then
@@ -263,8 +270,8 @@ view_all_containers_menu() {
               local hp=$(echo "$h_part" | grep -oE -- '^[0-9]+$' || echo "")
               if [[ -n "$hp" ]]; then
                 # De-duplicate
-                if [[ -z "${seen_ports[$hp]:-}" ]]; then
-                  seen_ports[$hp]=1
+                if [[ "$seen_ports" != *" $hp "* ]]; then
+                  seen_ports="${seen_ports}$hp "
                   local lp="${tunnel_port_map[$hp]:-}"
                   host_ports="${host_ports}${hp}, "
                   if [[ -n "$lp" ]]; then
